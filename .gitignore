@@ -48,3 +48,4 @@ htmlcov/
 # Distribution
 *.tar.gz
 *.whl
+backend/docs_cache/

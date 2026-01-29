@@ -64,55 +64,62 @@
 ## Phase 2: 데이터 소스 & LLM 🚧
 
 ### 환경 설정
-- [ ] .env 파일 생성 및 API 키 입력
-  - [ ] DART_API_KEY
-  - [ ] NAVER_CLIENT_ID, NAVER_CLIENT_SECRET
-  - [ ] YOUTUBE_API_KEY
-  - [ ] OPENAI_API_KEY 또는 ANTHROPIC_API_KEY
+- [x] .env 파일 생성 및 API 키 입력
+  - [x] DART_API_KEY
+  - [x] NAVER_CLIENT_ID, NAVER_CLIENT_SECRET
+  - [ ] YOUTUBE_API_KEY (나중에 진행)
+  - [x] OPENAI_API_KEY
 - [ ] Alembic 초기 마이그레이션 생성 및 적용
   ```bash
   cd backend
   alembic revision --autogenerate -m "Initial schema"
   alembic upgrade head
   ```
+  > **Note**: Docker 환경 설정 후 진행 필요
 
 ### 데이터 소스 클라이언트
-- [ ] **DART 클라이언트** (backend/app/data_sources/dart_client.py)
-  - [ ] OpenDartReader 래퍼 클래스 작성
-  - [ ] 재무제표 조회 함수 (fnlttSinglAcntAll)
-  - [ ] 공시 검색 함수 (list)
-  - [ ] 에러 핸들링 및 재시도 로직
-  - [ ] 테스트: 삼성전자(005930) 재무제표 조회
+- [x] **DART 클라이언트** (backend/app/data_sources/dart_client.py)
+  - [x] OpenDartReader 래퍼 클래스 작성
+  - [x] 재무제표 조회 함수 (fnlttSinglAcntAll)
+  - [x] 공시 검색 함수 (list)
+  - [x] 에러 핸들링 및 재시도 로직
+  - [x] 기업코드 조회 함수 (종목코드 → DART 기업코드)
+  - [x] 재무 데이터 파싱 함수
 
-- [ ] **주가 데이터 클라이언트** (backend/app/data_sources/stock_client.py)
-  - [ ] pykrx 래퍼 클래스 작성
-  - [ ] OHLCV 데이터 조회 (get_market_ohlcv_by_date)
-  - [ ] 시가총액 조회 (get_market_cap)
-  - [ ] 날짜 범위 처리
-  - [ ] 테스트: 삼성전자(005930) 최근 1년 주가
+- [x] **주가 데이터 클라이언트** (backend/app/data_sources/stock_client.py)
+  - [x] pykrx 래퍼 클래스 작성
+  - [x] OHLCV 데이터 조회 (get_market_ohlcv_by_date)
+  - [x] 시가총액 조회 (get_market_cap)
+  - [x] 날짜 범위 처리
+  - [x] 최근 주가 조회 함수
+  - [x] 펀더멘털 데이터 조회 (PER, PBR, 배당수익률)
+  - [x] 수익률 계산 함수 (1M, 3M, 6M, 1Y)
+  - [x] 52주 최고/최저가 조회
 
-- [ ] **네이버 API 클라이언트** (backend/app/data_sources/naver_client.py)
-  - [ ] httpx 기반 클라이언트 작성
-  - [ ] 뉴스 검색 API (news.json)
-  - [ ] 블로그 검색 API (blog.json)
-  - [ ] 페이지네이션 처리
-  - [ ] Rate limiting 처리
-  - [ ] 테스트: "삼성전자" 뉴스 검색
+- [x] **네이버 API 클라이언트** (backend/app/data_sources/naver_client.py)
+  - [x] httpx 기반 비동기 클라이언트 작성
+  - [x] 뉴스 검색 API (news.json)
+  - [x] 블로그 검색 API (blog.json)
+  - [x] 동시 검색 함수 (뉴스 + 블로그)
+  - [x] 페이지네이션 처리
+  - [x] Rate limiting 처리 (delay 파라미터)
+  - [x] HTML 태그 제거 함수
 
 - [ ] **YouTube 클라이언트** (backend/app/data_sources/youtube_client.py)
   - [ ] YouTube Data API v3 연동
   - [ ] 영상 검색 (search.list)
   - [ ] 메타데이터 조회 (videos.list)
   - [ ] 할당량 관리
-  - [ ] 테스트: "삼성전자 투자" 영상 검색
+  > **Deferred**: 유저 요청으로 나중에 진행
 
 ### LLM 설정
-- [ ] LiteLLM 프로바이더 설정 완성 (backend/app/llm/provider.py)
-  - [ ] OpenAI 설정
-  - [ ] Anthropic 설정
-  - [ ] 폴백 체인 구성 (Claude 실패 시 GPT로)
-  - [ ] 비용 추적 로깅
-  - [ ] 테스트: 간단한 프롬프트 실행
+- [x] LiteLLM 프로바이더 설정 완성 (backend/app/llm/provider.py)
+  - [x] OpenAI 설정
+  - [x] Anthropic 설정 (ANTHROPIC_API_KEY 미설정 시 GPT만 사용)
+  - [x] 폴백 체인 구성 (Claude 실패 시 GPT로, 또는 그 반대)
+  - [x] 비용 추적 로깅 (usage 정보)
+  - [x] 동기/비동기 completion 메서드
+  - [x] 싱글톤 패턴 (get_llm_provider)
 
 ### LangChain 도구 래핑
 - [ ] information/tools/dart_tool.py
@@ -124,11 +131,11 @@
 - [ ] financial/tools/ratio_calculator.py
 
 ### 테스트 스크립트
-- [ ] tests/test_dart_client.py
-- [ ] tests/test_stock_client.py
-- [ ] tests/test_naver_client.py
-- [ ] tests/test_youtube_client.py
-- [ ] tests/test_llm_provider.py
+- [x] tests/test_dart_client.py
+- [x] tests/test_stock_client.py
+- [x] tests/test_naver_client.py
+- [ ] tests/test_youtube_client.py (Deferred)
+- [x] tests/test_llm_provider.py
 
 ---
 
