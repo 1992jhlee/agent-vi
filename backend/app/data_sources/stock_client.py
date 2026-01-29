@@ -61,8 +61,13 @@ class StockClient:
                 logger.warning(f"OHLCV 데이터가 없습니다: {stock_code}")
                 return None
 
-            # 컬럼명 영문화
-            df.columns = ["open", "high", "low", "close", "volume"]
+            # 컬럼명 영문화 (실제 컬럼 수에 맞춰 동적 처리)
+            expected_cols = ["open", "high", "low", "close", "volume"]
+            if len(df.columns) >= len(expected_cols):
+                df.columns = expected_cols + list(df.columns[len(expected_cols):])
+            else:
+                logger.warning(f"예상과 다른 컬럼 수: {df.columns}")
+                # 기존 컬럼명 유지
 
             logger.info(f"OHLCV 조회 성공: {len(df)} 일")
             return df
@@ -106,8 +111,16 @@ class StockClient:
                 logger.warning(f"시가총액 데이터가 없습니다: {stock_code}")
                 return None
 
-            # 컬럼명 영문화
-            df.columns = ["close_price", "market_cap", "volume", "trade_value", "shares_outstanding"]
+            # 컬럼명 영문화 (실제 컬럼 수에 맞춰 동적 처리)
+            expected_cols = ["close_price", "market_cap", "volume", "trade_value", "shares_outstanding"]
+            if len(df.columns) >= len(expected_cols):
+                df.columns = expected_cols + list(df.columns[len(expected_cols):])
+            elif len(df.columns) == 4:
+                # 컬럼이 4개인 경우 (shares_outstanding 제외)
+                df.columns = ["close_price", "market_cap", "volume", "trade_value"]
+            else:
+                logger.warning(f"예상과 다른 컬럼 수: {df.columns}")
+                # 기존 컬럼명 유지
 
             logger.info(f"시가총액 조회 성공: {len(df)} 일")
             return df

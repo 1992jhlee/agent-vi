@@ -139,52 +139,66 @@
 
 ---
 
-## Phase 3: 에이전트 파이프라인 📋
+## Phase 3: 에이전트 파이프라인 🚧
 
 ### LangGraph 그래프
-- [ ] graph.py 완성
-  - [ ] 병렬 실행 구조 (fan-out/fan-in)
-  - [ ] PostgreSQL 체크포인터 설정
-  - [ ] 에러 핸들링
-  - [ ] 재시도 로직
+- [x] graph.py 완성
+  - [x] 병렬 실행 구조 (fan-out/fan-in)
+  - [x] orchestrator_start 및 orchestrator_merge 노드
+  - [x] 에러 핸들링
+  - [ ] PostgreSQL 체크포인터 설정 (Optional)
+  - [ ] 재시도 로직 (Optional)
+
+### LangChain Tool 래퍼
+- [x] information/tools/dart_tool.py (공시 검색)
+- [x] information/tools/naver_news_tool.py (뉴스 검색)
+- [x] financial/tools/dart_financial_tool.py (재무제표)
+- [x] financial/tools/stock_price_tool.py (주가 분석)
 
 ### 정보 수집 에이전트
-- [ ] agents/information/agent.py
-- [ ] agents/information/prompts.py
-- [ ] 뉴스 센티먼트 분석
-- [ ] 실적 전망 요약
+- [x] agents/information/agent.py
+- [x] agents/information/prompts.py
+- [x] DART 공시 검색
+- [x] 네이버 뉴스 검색 및 센티먼트 분석
+- [x] LLM 기반 정보 종합 분석
 
 ### 재무 분석 에이전트
-- [ ] agents/financial/agent.py
-- [ ] agents/financial/prompts.py
-- [ ] 재무비율 자동 계산 로직
-- [ ] 동종업계 비교
+- [x] agents/financial/agent.py
+- [x] agents/financial/prompts.py
+- [x] DART 재무제표 조회
+- [x] 주가 데이터 및 기술적 분석
+- [x] 재무비율 계산 (ROE, 영업이익률, 부채비율)
+- [x] LLM 기반 재무 분석
 
 ### 가치투자 평가 에이전트
-- [ ] agents/valuation/agent.py
-  - [ ] knowledge/*.md 파일 로딩 구현
-  - [ ] Deep Value 평가
-  - [ ] Quality 평가
-- [ ] agents/valuation/prompts.py
-- [ ] frameworks/deep_value.py (정량 계산)
-- [ ] frameworks/quality.py (정성 평가)
+- [x] agents/valuation/agent.py
+  - [x] knowledge/*.md 파일 로딩 구현
+  - [x] Deep Value 평가 (0-100 점수)
+  - [x] Quality 평가 (0-100 점수)
+  - [x] 종합 점수 계산 (가중 평균)
+  - [x] 투자 판단 (strong_buy/buy/hold/sell/strong_sell)
+- [x] agents/valuation/prompts.py
+  - [x] knowledge base 로딩 함수
+  - [x] Deep Value 프롬프트 템플릿
+  - [x] Quality 프롬프트 템플릿
 
 ### 보고서 생성 에이전트
-- [ ] agents/report/agent.py
-- [ ] agents/report/templates.py
-- [ ] 마크다운 보고서 생성
-- [ ] DB 저장 로직
-- [ ] Slug 생성
+- [x] agents/report/agent.py
+- [x] agents/report/prompts.py
+- [x] LLM 기반 보고서 생성
+- [x] DB 저장 로직 (analysis_reports 테이블)
+- [x] Slug 생성 (python-slugify)
+
+### E2E 테스트
+- [x] tests/test_pipeline_e2e.py 작성
+- [ ] 실제 파이프라인 실행 테스트
+- [ ] 3~5개 기업으로 전체 파이프라인 검증
 
 ### 서비스 레이어
 - [ ] services/analysis_service.py
   - [ ] LangGraph 파이프라인 호출
   - [ ] 백그라운드 작업 실행
   - [ ] 상태 업데이트
-
-### E2E 테스트
-- [ ] tests/test_pipeline_e2e.py
-- [ ] 3~5개 기업으로 전체 파이프라인 테스트
 
 ---
 
