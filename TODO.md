@@ -40,11 +40,19 @@
 - [x] companies.py - 종목 등록 API 수정 (BackgroundTasks)
 - [x] financials.py - 재수집 API 추가
 - [x] router.py - stocks 라우터 등록
+- [x] **스마트 파싱**: 컨텍스트 기반 매출액 추정
+- [x] **메타데이터 추적**: 추정값 여부 저장 (raw_data_json)
+- [x] **데이터 수집 확장**: 6년 연간 + 8분기 데이터
+- [x] **CORS 업데이트**: localhost:3001 지원
 
 ### 프론트엔드
 - [x] FinancialTable.tsx - 재무표 컴포넌트
+  - [x] **테이블 transpose** (행=항목, 열=연도/분기)
+  - [x] **추정값 표시** (*표시 + 툴팁)
+  - [x] **발표 전 표시** (미발표 데이터)
 - [x] CompanyCreateModal.tsx - 자동완성 모달
 - [x] companies/[stock_code]/page.tsx - 상세 페이지
+  - [x] **뒤로 가기 버튼** 추가
 - [x] companies/page.tsx - 목록 페이지
 - [x] lib/api.ts - searchStocks 함수 추가
 - [x] lib/types.ts - StockSearchResult 타입 추가
@@ -147,6 +155,10 @@
 - ✅ 재무실적 표시 (연간 6년 + 분기 8분기)
 - ✅ 증분 데이터 수집 (중복 방지)
 - ✅ 억 원 단위 표시 & 증감률
+- ✅ **스마트 파싱**: 계정과목명 차이 자동 처리
+- ✅ **추정값 투명성**: * 표시 + 툴팁으로 사용자 알림
+- ✅ **테이블 transpose**: 가독성 향상
+- ✅ **발표 전 데이터 구분**: 미발표 실적 표시
 - ✅ 기존 AI 분석 코드 유지
 
 ### 다음 세션 시작할 때
