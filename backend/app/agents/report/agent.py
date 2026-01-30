@@ -5,14 +5,44 @@
 import logging
 from datetime import datetime
 
+import httpx
 from slugify import slugify
 
 from app.agents.report.prompts import REPORT_PROMPT_TEMPLATE, SYSTEM_PROMPT
 from app.agents.state import AnalysisState
+from app.config import settings
 from app.db.session import get_sync_session
 from app.llm.provider import get_llm_provider
 
 logger = logging.getLogger(__name__)
+
+
+def trigger_revalidation(slug: str) -> bool:
+    """
+    프론트엔드 ISR 재검증 웹훅을 호출합니다.
+
+    Args:
+        slug: 보고서 slug
+
+    Returns:
+        성공 여부
+    """
+    try:
+        url = f"{settings.frontend_url}/api/revalidate"
+        response = httpx.post(
+            url,
+            json={"slug": slug, "secret": settings.revalidation_secret},
+            timeout=10.0,
+        )
+        if response.status_code == 200:
+            logger.info(f"ISR 재검증 성공: {slug}")
+            return True
+        else:
+            logger.warning(f"ISR 재검증 실패: {response.status_code} - {response.text}")
+            return False
+    except Exception as e:
+        logger.warning(f"ISR 재검증 호출 실패: {e}")
+        return False
 
 
 def generate_report_node(state: AnalysisState) -> AnalysisState:
@@ -109,12 +139,15 @@ def generate_report_node(state: AnalysisState) -> AnalysisState:
             session.refresh(report)
 
             report_id = report.id
+            saved_slug = slug
 
-        logger.info(f"보고서 저장 완료: ID={report_id}, slug={slug}")
+        logger.info(f"보고서 저장 완료: ID={report_id}, slug={saved_slug}")
+
+        # ISR 재검증 트리거
+        trigger_revalidation(saved_slug)
 
         # 상태 업데이트
         return {
-            **state,
             "report_sections": {"full_report": report_content},
             "report_id": report_id,
             "current_stage": "report_generated",
@@ -123,11 +156,10 @@ def generate_report_node(state: AnalysisState) -> AnalysisState:
     except Exception as e:
         logger.error(f"보고서 생성 오류: {e}", exc_info=True)
 
-        errors = state.get("errors", [])
+        errors = list(state.get("errors", []))
         errors.append(f"보고서 생성 오류: {str(e)}")
 
         return {
-            **state,
             "errors": errors,
             "current_stage": "report_failed",
         }
