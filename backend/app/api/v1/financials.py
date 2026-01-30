@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Company, FinancialStatement, ValuationMetric
 from app.db.session import get_db
+from app.services.financial_service import collect_financial_data
 
 router = APIRouter(prefix="/financials", tags=["financials"])
 
@@ -103,3 +104,39 @@ async def get_valuation_metrics(
             "moat_score": metric.moat_score,
         },
     }
+
+
+@router.post("/{stock_code}/refresh")
+async def refresh_financial_data(
+    stock_code: str,
+    force: bool = Query(False, description="기존 데이터 덮어쓰기 여부"),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    재무데이터를 수동으로 갱신합니다.
+
+    Args:
+        stock_code: 종목코드
+        force: True일 경우 기존 데이터를 덮어씁니다.
+
+    Returns:
+        갱신 시작 메시지
+    """
+    result = await db.execute(select(Company).where(Company.stock_code == stock_code))
+    company = result.scalar_one_or_none()
+    if not company:
+        raise HTTPException(status_code=404, detail="등록되지 않은 종목코드입니다.")
+
+    if not company.corp_code:
+        raise HTTPException(status_code=400, detail="DART 기업코드가 없어 재무데이터를 수집할 수 없습니다.")
+
+    background_tasks.add_task(
+        collect_financial_data,
+        company.id,
+        company.stock_code,
+        company.corp_code,
+        force
+    )
+
+    return {"message": "재무데이터 갱신이 시작되었습니다.", "stock_code": stock_code}

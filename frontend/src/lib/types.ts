@@ -1,3 +1,10 @@
+// Stock search types
+export interface StockSearchResult {
+  stock_code: string;
+  company_name: string;
+  market: string;
+}
+
 // Company types
 export interface Company {
   id: number;

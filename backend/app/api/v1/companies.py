@@ -1,12 +1,17 @@
+import logging
 import math
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.data_sources.dart_client import DARTClient
 from app.db.models import Company
 from app.db.session import get_db
 from app.schemas import CompanyCreate, CompanyListResponse, CompanyResponse, CompanyUpdate
+from app.services.financial_service import collect_financial_data
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/companies", tags=["companies"])
 
@@ -55,6 +60,7 @@ async def list_companies(
 @router.post("", response_model=CompanyResponse, status_code=201)
 async def create_company(
     data: CompanyCreate,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ):
     # Check duplicate
@@ -65,9 +71,36 @@ async def create_company(
         raise HTTPException(status_code=409, detail="이미 등록된 종목코드입니다.")
 
     company = Company(**data.model_dump())
+
+    # DART 기업코드 조회
+    if not company.corp_code:
+        try:
+            dart = DARTClient()
+            corp_code = dart.get_corp_code_by_stock_code(data.stock_code)
+            if corp_code:
+                company.corp_code = corp_code
+                logger.info(f"DART 기업코드 조회 성공: {data.stock_code} -> {corp_code}")
+        except Exception as e:
+            logger.warning(f"DART 기업코드 조회 실패: {data.stock_code} - {e}")
+
     db.add(company)
     await db.flush()
     await db.refresh(company)
+
+    # 백그라운드에서 재무데이터 수집
+    if company.corp_code:
+        background_tasks.add_task(
+            collect_financial_data,
+            company.id,
+            company.stock_code,
+            company.corp_code,
+            False  # force_update=False
+        )
+        logger.info(f"재무데이터 수집 작업 예약: {company.stock_code}")
+    else:
+        logger.warning(f"DART 기업코드가 없어 재무데이터 수집 스킵: {company.stock_code}")
+
+    await db.commit()
     return CompanyResponse.model_validate(company)
 
 

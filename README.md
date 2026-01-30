@@ -1,39 +1,34 @@
 # Agent-VI
 
-**가치투자 철학 기반 AI 기업 분석 에이전트**
+**한국 주식 재무실적 뷰어**
 
-Agent-VI는 Deep Value와 Quality 투자 철학을 적용하여 한국 주식(KOSPI/KOSDAQ)을 분석하고 보고서를 자동 생성하는 멀티 에이전트 시스템입니다.
+Agent-VI는 KOSPI/KOSDAQ 종목의 재무제표를 간편하게 조회하고 분석할 수 있는 웹 애플리케이션입니다.
 
-## 주요 특징
+## 주요 기능
 
-### 🎯 투자 철학 기반 분석
-- **Deep Value**: 자산가치 대비 저평가 기업 발굴 (안전마진, NCAV, 그레이엄 넘버)
-- **Quality**: 우수 기업을 합리적 가격에 매수 (경제적 해자, 경영진 품질, 성장성)
+### 📈 종목 등록 & 자동완성
+- 종목명 또는 종목코드로 검색
+- 실시간 자동완성으로 정확한 종목 선택
+- DART API를 통한 자동 기업정보 조회
 
-### 🤖 멀티 에이전트 파이프라인
-- **정보 수집 에이전트**: DART 공시, 네이버 뉴스, YouTube, 블로그 분석
-- **재무 분석 에이전트**: 재무제표, 주가 데이터, 밸류에이션 지표 계산
-- **가치투자 평가 에이전트**: Knowledge Base 기반 Deep Value + Quality 평가
-- **보고서 생성 에이전트**: 최종 보고서 작성 및 웹 게시
+### 💼 재무실적 조회
+- **연간 실적**: 최근 6년 (매출액, 영업이익, 순이익)
+- **분기 실적**: 최근 8분기 (매출액, 영업이익, 순이익)
+- 억 원 단위 표시 및 전년 대비 증감률 표시
 
-### 📚 유연한 지식 관리
-- 투자 철학을 마크다운 파일(`knowledge/*.md`)로 관리
-- 사용자가 직접 편집 가능, 다음 분석부터 자동 반영
-- 특정 대가에 종속되지 않아 자유롭게 발전
-
-### ⚡ 병렬 처리 & 재개 가능
-- LangGraph로 정보 수집과 재무 분석을 동시 실행
-- PostgreSQL 체크포인팅으로 실패 시 마지막 성공 지점부터 재개
+### 🔄 증분 데이터 수집
+- 한 번 수집한 데이터는 DB에 저장
+- 재수집 시 새로운 데이터만 추가로 가져옴
+- 중복 데이터 방지 및 빠른 조회
 
 ## 기술 스택
 
-- **Backend**: FastAPI + SQLAlchemy 2.0 + Alembic
-- **Frontend**: Next.js 15 (App Router, ISR) + Tailwind CSS
-- **Agent Framework**: LangGraph 1.0+ (with PostgreSQL checkpointing)
-- **LLM**: LiteLLM (OpenAI, Anthropic 등 멀티 프로바이더)
-- **Database**: PostgreSQL 16
-- **Scheduler**: APScheduler
-- **Data Sources**: OpenDartReader (DART), pykrx (주가), Naver API, YouTube Data API
+- **Backend**: FastAPI + SQLAlchemy 2.0 + PostgreSQL
+- **Frontend**: Next.js 15 (App Router) + Tailwind CSS
+- **Data Sources**:
+  - DART API (OpenDartReader) - 재무제표
+  - pykrx - 주가 데이터
+  - Naver API - 뉴스/블로그 (향후 기능)
 
 ## 빠른 시작
 
@@ -58,10 +53,8 @@ cp .env.example .env
 
 `.env` 파일을 열어 필수 API 키를 입력하세요:
 
-- `DART_API_KEY`: [DART OpenAPI](https://opendart.fss.or.kr) 발급
-- `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET`: [Naver Developers](https://developers.naver.com)
-- `YOUTUBE_API_KEY`: Google Cloud Console에서 발급
-- `OPENAI_API_KEY` 또는 `ANTHROPIC_API_KEY`: LLM 프로바이더 키
+- `DART_API_KEY`: [DART OpenAPI](https://opendart.fss.or.kr) 발급 (필수)
+- `OPENAI_API_KEY`: (선택) AI 분석 기능 사용 시
 
 ### 3. Docker Compose로 실행
 
@@ -81,131 +74,121 @@ docker compose up
 docker compose exec backend alembic upgrade head
 ```
 
-### 5. 기업 등록 및 분석 실행
+## 사용 방법
 
-1. http://localhost:3000/companies 에서 관심 기업 등록
-2. http://localhost:3000/admin 에서 분석 실행
-3. 생성된 보고서는 http://localhost:3000/reports 에서 확인
+### 종목 등록
+
+1. http://localhost:3000/companies 접속
+2. "+ 종목 등록" 버튼 클릭
+3. 종목명 또는 종목코드 입력 (예: "삼성전자", "005930")
+4. 자동완성 목록에서 선택
+5. 등록 버튼 클릭
+
+등록 후 백그라운드에서 재무데이터가 자동으로 수집됩니다.
+
+### 재무실적 조회
+
+1. 종목 목록에서 "상세 보기" 클릭
+2. 연간 실적 표 확인 (최근 6년)
+3. 분기 실적 표 확인 (최근 8분기)
 
 ## 프로젝트 구조
 
 ```
 agent-vi/
-├── knowledge/                  # 투자 철학 Knowledge Base
-│   ├── deep_value.md           # 자산가치 중심 투자 원칙
-│   └── quality.md              # 기업 품질/성장 중심 투자 원칙
 ├── backend/
-│   └── app/
-│       ├── agents/             # LangGraph 에이전트 파이프라인
-│       ├── db/models/          # SQLAlchemy 모델
-│       ├── api/v1/             # FastAPI 라우터
-│       ├── data_sources/       # 외부 API 클라이언트
-│       ├── llm/                # LiteLLM 프로바이더
-│       └── scheduler/          # APScheduler 작업
+│   ├── app/
+│   │   ├── api/v1/           # API 엔드포인트
+│   │   │   ├── stocks.py     # 종목 검색
+│   │   │   ├── companies.py  # 종목 CRUD
+│   │   │   └── financials.py # 재무제표 조회
+│   │   ├── services/         # 비즈니스 로직
+│   │   │   └── financial_service.py  # 재무데이터 수집
+│   │   ├── data_sources/     # 외부 데이터 소스
+│   │   │   ├── dart_client.py        # DART API
+│   │   │   └── stock_client.py       # pykrx
+│   │   └── db/models/        # SQLAlchemy 모델
+│   └── alembic/              # DB 마이그레이션
 ├── frontend/
 │   └── src/
-│       ├── app/                # Next.js 페이지 (App Router)
-│       ├── components/         # React 컴포넌트
-│       └── lib/                # API 클라이언트, 타입 정의
-└── docs/
-    └── architecture.md         # 상세 아키텍처 문서
+│       ├── app/
+│       │   └── companies/
+│       │       ├── page.tsx           # 종목 목록
+│       │       └── [stock_code]/page.tsx  # 상세 페이지
+│       ├── components/companies/
+│       │   ├── CompanyCreateModal.tsx  # 등록 모달
+│       │   └── FinancialTable.tsx      # 재무표
+│       └── lib/
+│           ├── api.ts        # API 클라이언트
+│           └── types.ts      # TypeScript 타입
+└── docker-compose.yml
 ```
 
-## 투자 철학 커스터마이징
+## API 엔드포인트
 
-`knowledge/` 디렉토리의 마크다운 파일을 편집하여 투자 원칙을 변경할 수 있습니다:
+### 종목 검색
+```
+GET /api/v1/stocks/search?q=삼성
+```
 
+### 종목 등록
+```
+POST /api/v1/companies
+{
+  "stock_code": "005930",
+  "company_name": "삼성전자",
+  "market": "KOSPI"
+}
+```
+
+### 재무제표 조회
+```
+GET /api/v1/financials/005930?years=6
+```
+
+### 재무데이터 재수집
+```
+POST /api/v1/financials/005930/refresh?force=false
+```
+
+## 향후 계획
+
+### Phase 6: 데이터 시각화
+- 재무 트렌드 차트 (Recharts)
+- 주가 차트
+- 밸류에이션 지표 시각화
+
+### Phase 7: AI 분석 기능
+- 가치투자 철학 기반 자동 분석
+- LangGraph 멀티 에이전트 파이프라인
+- 투자 보고서 자동 생성
+
+자세한 로드맵은 [ROADMAP.md](./ROADMAP.md)를 참조하세요.
+
+## 문제 해결
+
+### DART 기업코드 조회 실패
+- 종목코드가 정확한지 확인하세요.
+- DART API 키가 올바르게 설정되었는지 확인하세요.
+
+### 재무데이터가 표시되지 않음
+- 종목 등록 직후에는 데이터 수집에 수 분이 소요될 수 있습니다.
+- 잠시 후 페이지를 새로고침해주세요.
+
+### PostgreSQL 연결 오류
 ```bash
-# 에디터로 직접 편집
-vim knowledge/deep_value.md
-vim knowledge/quality.md
-
-# 또는 웹 UI에서 편집
-# http://localhost:3000/admin/knowledge
+# 데이터베이스 재시작
+docker compose restart db
 ```
-
-다음 분석 실행부터 변경된 원칙이 자동 반영됩니다.
-
-## 스케줄링
-
-APScheduler로 주기적 작업을 자동화할 수 있습니다:
-
-```bash
-# 스케줄러를 별도 프로세스로 실행
-docker compose --profile full up
-```
-
-기본 스케줄:
-- **일일 주가 업데이트**: 평일 18:00 KST
-- **일일 뉴스 스캔**: 평일 08:00, 14:00 KST
-- **주간 전체 분석**: 매주 토요일 09:00 KST
-- **분기 재무 업데이트**: 1/4/7/10월 15일
-
-## 개발
-
-### 백엔드 개발
-
-```bash
-cd backend
-
-# 의존성 설치
-pip install -e ".[dev]"
-
-# 개발 서버 실행
-uvicorn app.main:app --reload
-
-# 테스트 실행
-pytest
-
-# 코드 포매팅
-ruff format .
-
-# 마이그레이션 생성
-alembic revision --autogenerate -m "description"
-alembic upgrade head
-```
-
-### 프론트엔드 개발
-
-```bash
-cd frontend
-
-# 의존성 설치
-npm install
-
-# 개발 서버 실행
-npm run dev
-
-# 빌드
-npm run build
-
-# 린트
-npm run lint
-```
-
-## API 문서
-
-백엔드가 실행 중일 때 다음 주소에서 자동 생성된 API 문서를 확인할 수 있습니다:
-
-- Swagger UI: http://localhost:8000/docs
-- ReDoc: http://localhost:8000/redoc
 
 ## 라이선스
 
 MIT License
 
-## 참고 문서
+## 기여
 
-### 프로젝트 문서
-- [TODO.md](./TODO.md) - 할 일 체크리스트 (현재 작업 상태)
-- [ROADMAP.md](./ROADMAP.md) - 구현 로드맵 (Phase 1~6)
-- [아키텍처 문서](./docs/architecture.md) - 시스템 설계 상세
+이슈 및 PR은 언제나 환영합니다!
 
-### 외부 문서
-- [LangGraph 공식 문서](https://langchain-ai.github.io/langgraph/)
-- [DART OpenAPI 가이드](https://opendart.fss.or.kr/guide/detail.do?apiGrpCd=DS001)
-- [pykrx 문서](https://github.com/sharebook-kr/pykrx)
+## 문의
 
----
-
-**Agent-VI** - 가치투자 철학과 AI를 결합한 기업 분석 솔루션
+프로젝트 관련 문의사항은 GitHub Issues를 이용해주세요.

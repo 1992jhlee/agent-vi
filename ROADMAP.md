@@ -1,302 +1,277 @@
-# Agent-VI 구현 로드맵
+# Agent-VI 로드맵
 
-## 전체 개요
+## 프로젝트 방향
 
-Agent-VI는 6단계(Phase)로 나뉘어 구현됩니다. 각 단계는 독립적으로 테스트 가능하며, 점진적으로 기능을 확장합니다.
-
----
-
-## Phase 1: 프로젝트 기반 구축 ✅ **완료**
-
-### 목표
-프로젝트 골격과 데이터베이스 설계 완성
-
-### 완료 항목
-- [x] Python 프로젝트 초기화 (pyproject.toml)
-- [x] Next.js 15 프로젝트 초기화 (TypeScript + Tailwind)
-- [x] Docker Compose 설정 (PostgreSQL + backend + frontend)
-- [x] SQLAlchemy 2.0 모델 7개 작성
-  - companies, analysis_runs, financial_statements
-  - stock_prices, news_articles, valuation_metrics, analysis_reports
-- [x] Alembic 마이그레이션 설정
-- [x] FastAPI 기본 골격
-  - config.py (pydantic-settings)
-  - 5개 API 라우터 (companies, reports, analysis, financials, health)
-- [x] Next.js 페이지 골격 (7개 페이지)
-- [x] Knowledge Base 마크다운 파일 (deep_value.md, quality.md)
-- [x] LangGraph 상태 스키마 및 그래프 골격
-- [x] 문서 작성 (README.md, docs/architecture.md)
-
-### 검증
-```bash
-# 프로젝트 구조 확인
-ls backend/app/db/models/
-ls frontend/src/app/
-
-# API 문서 확인 (서버 실행 후)
-# http://localhost:8000/docs
-```
+Agent-VI는 단계적으로 기능을 확장하며, 작은 기능부터 시작하여 점진적으로 발전시켜 나가는 방식을 채택합니다.
 
 ---
 
-## Phase 2: 데이터 소스 & LLM ✅ **완료**
+## Phase 1: 프로젝트 기반 구축 ✅ (완료)
 
-### 목표
-외부 데이터를 가져오는 클라이언트와 LLM 연동 완성
+**기간**: 2026-01-15 ~ 2026-01-18
 
-### 완료 항목
-- [x] **DART 클라이언트** (`backend/app/data_sources/dart_client.py`)
-  - OpenDartReader 래퍼 작성
-  - 재무제표 조회 함수 (fnlttSinglAcntAll)
-  - 공시 검색 함수
-  - 에러 핸들링 및 재시도 로직
+### 백엔드
+- FastAPI 프로젝트 초기화
+- PostgreSQL + SQLAlchemy 2.0 설정
+- 데이터베이스 모델 7개 작성
+  - Company, FinancialStatement, StockPrice, ValuationMetric
+  - AnalysisRun, AnalysisReport, NewsArticle
+- Alembic 마이그레이션 설정
+- 기본 API 라우터 구조
 
-- [x] **주가 데이터 클라이언트** (`backend/app/data_sources/stock_client.py`)
-  - pykrx 래퍼 작성
+### 프론트엔드
+- Next.js 15 프로젝트 초기화 (App Router)
+- Tailwind CSS 설정
+- 페이지 골격 생성
+- API 클라이언트 기본 구조
+
+### 문서
+- README.md, ROADMAP.md, TODO.md 작성
+
+---
+
+## Phase 2: 데이터 소스 & LLM 통합 ✅ (완료)
+
+**기간**: 2026-01-19 ~ 2026-01-22
+
+### 데이터 소스 클라이언트
+- **DART 클라이언트** (`dart_client.py`)
+  - OpenDartReader 래핑
+  - 재무제표 조회 (연간/분기)
+  - 재무 데이터 파싱
+  - 기업코드 조회
+
+- **주가 데이터 클라이언트** (`stock_client.py`)
+  - pykrx 래핑
   - OHLCV 데이터 조회
-  - 시가총액, 52주 최고/최저가 조회
-  - 수익률 계산 (1M, 3M, 6M, 1Y)
+  - 펀더멘털 데이터 (PER, PBR, 배당수익률)
+  - 수익률 계산
 
-- [x] **네이버 API 클라이언트** (`backend/app/data_sources/naver_client.py`)
-  - 뉴스/블로그 검색 API (비동기)
-  - 페이지네이션 및 Rate limiting 처리
+- **네이버 API 클라이언트** (`naver_client.py`)
+  - 뉴스 검색
+  - 블로그 검색
   - HTML 태그 제거
 
-- [ ] **YouTube 클라이언트** - Deferred (나중에 진행)
+### LLM 설정
+- LiteLLM 프로바이더 설정 (`llm/provider.py`)
+- OpenAI 및 Anthropic 설정
+- 비용 추적 로깅
 
-- [x] **LiteLLM 프로바이더 설정**
-  - OpenAI, Anthropic 설정
-  - 폴백 체인 구성
-  - 비용 추적 로깅
-
-- [x] **LangChain 도구 래핑**
-  - DART, Naver, 주가 분석 도구 구현
-
-### 검증
-```bash
-# 삼성전자(005930) 데이터 조회 테스트
-python backend/tests/test_dart_client.py
-python backend/tests/test_stock_client.py
-
-# LLM 연동 테스트
-python backend/tests/test_llm_provider.py
-```
+### 테스트
+- 각 클라이언트별 통합 테스트 작성
 
 ---
 
-## Phase 3: 에이전트 파이프라인 ✅ **완료**
+## Phase 3: 에이전트 파이프라인 ✅ (완료)
+
+**기간**: 2026-01-23 ~ 2026-01-26
+
+### LangGraph 그래프
+- 병렬 실행 구조 (fan-out/fan-in)
+- Orchestrator 노드 (start, merge)
+- 에러 핸들링
+
+### 에이전트
+- **정보 수집 에이전트**: DART 공시 + 뉴스 검색
+- **재무 분석 에이전트**: 재무제표 + 주가 분석
+- **가치투자 평가 에이전트**: Deep Value + Quality 평가
+- **보고서 생성 에이전트**: 최종 보고서 작성
+
+### Knowledge Base
+- `knowledge/deep_value.md`: Deep Value 투자 철학
+- `knowledge/quality.md`: Quality 투자 철학
+
+---
+
+## Phase 4: API & 프론트엔드 ✅ (완료)
+
+**기간**: 2026-01-27 ~ 2026-01-29
+
+### 분석 실행 API
+- 백그라운드 분석 실행 (ThreadPoolExecutor)
+- 실시간 상태 조회
+- 에러 처리
+
+### 서비스 레이어
+- `analysis_service.py`: LangGraph 파이프라인 호출
+
+### 프론트엔드 페이지
+- 홈 페이지 (최근 보고서 + 통계)
+- 보고서 목록 (필터/정렬)
+- 보고서 상세 (전체 분석 내용)
+- 관리자 대시보드 (분석 실행 UI)
+
+### ISR 재검증
+- 백엔드 웹훅 호출
+- 프론트엔드 `/api/revalidate` 구현
+
+---
+
+## Phase 5: 재무실적 뷰어 MVP ✅ (완료)
+
+**기간**: 2026-01-30
 
 ### 목표
-4개 에이전트가 협력하는 LangGraph 파이프라인 완성 (프로젝트 핵심)
+간단하고 실용적인 재무실적 조회 기능부터 시작
 
-### 완료 항목
-- [x] **LangGraph 그래프 완성** (`backend/app/agents/graph.py`)
-  - 병렬 실행 구조 (fan-out/fan-in) 구현
-  - 에러 핸들링
-  - [ ] PostgreSQL 체크포인터 설정 (Optional)
+### 백엔드 개발
+- **종목 검색 API** (`stocks.py`)
+  - pykrx 전체 종목 리스트 캐싱
+  - 종목명/종목코드 자동완성 검색
 
-- [x] **정보 수집 에이전트** (`backend/app/agents/information/`)
-  - agent.py: 메인 에이전트 로직
-  - prompts.py: 시스템 프롬프트
-  - tools/: DART 공시, Naver 뉴스 검색
-  - LLM 기반 정보 종합 분석
+- **증분 데이터 수집** (`financial_service.py`)
+  - DB에서 기존 데이터 확인
+  - 없는 연도/분기만 DART에서 수집
+  - 중복 방지 로직
 
-- [x] **재무 분석 에이전트** (`backend/app/agents/financial/`)
-  - agent.py: 재무 분석 로직
-  - prompts.py: 분석 프롬프트
-  - tools/: DART 재무, 주가 분석
-  - 재무비율 자동 계산 (ROE, 영업이익률, 부채비율)
+- **종목 등록 API 수정** (`companies.py`)
+  - BackgroundTasks로 재무데이터 자동 수집
+  - DART 기업코드 자동 조회
 
-- [x] **가치투자 평가 에이전트** (`backend/app/agents/valuation/`)
-  - knowledge/*.md 파일 로딩 구현
-  - Deep Value 평가 (0-100 점수)
-  - Quality 평가 (0-100 점수)
-  - 투자 판단 (strong_buy/buy/hold/sell/strong_sell)
+- **재수집 API** (`financials.py`)
+  - 수동 재무데이터 갱신
+  - force 옵션으로 기존 데이터 덮어쓰기
 
-- [x] **보고서 생성 에이전트** (`backend/app/agents/report/`)
-  - 모든 분석 결과 종합
-  - 마크다운 형식 보고서 생성
-  - DB 저장 (analysis_reports 테이블)
-  - Slug 생성 (python-slugify)
-  - ISR 재검증 웹훅 호출
+### 프론트엔드 개발
+- **재무표 컴포넌트** (`FinancialTable.tsx`)
+  - 연간/분기 구분
+  - 억 원 단위 포맷팅
+  - 전년 대비 증감률 표시
 
-- [x] **analysis_service.py 구현**
-  - LangGraph 파이프라인 호출
-  - ThreadPoolExecutor 백그라운드 실행
-  - 상태 업데이트 (pending → running → completed/failed)
+- **종목 등록 모달** (`CompanyCreateModal.tsx`)
+  - 종목명 자동완성
+  - 디바운싱 (300ms)
+  - 선택된 종목 확인 UI
 
-### 검증
-```bash
-# E2E 테스트
-python backend/tests/test_pipeline_e2e.py
+- **종목 상세 페이지** (`companies/[stock_code]/page.tsx`)
+  - 연간 실적 표 (최근 6년)
+  - 분기 실적 표 (최근 8분기)
 
-# analysis_runs 테이블에서 상태 확인
-psql -d agent_vi -c "SELECT id, status, company_id FROM analysis_runs ORDER BY created_at DESC LIMIT 5;"
-```
+- **종목 목록 페이지** (`companies/page.tsx`)
+  - 검색 및 필터링
+  - 페이지네이션
+  - 종목 등록 버튼
 
----
+### 문서 업데이트
+- README.md: 재무실적 뷰어 중심으로 재작성
+- ROADMAP.md: 새로운 단계별 로드맵
+- TODO.md: Phase 5 완료 반영
 
-## Phase 4: API & 프론트엔드 ✅ **완료**
-
-### 목표
-분석 결과를 웹에서 보여주는 UI 완성
-
-### 완료 항목
-- [x] **분석 실행 API 완성**
-  - `/api/v1/analysis/run` 백그라운드 실행 (ThreadPoolExecutor)
-  - 실시간 상태 조회 (폴링 방식)
-  - 에러 처리
-
-- [x] **Next.js 페이지 구현**
-  - 홈: 최근 보고서 + 요약 통계
-  - 보고서 목록: 필터/정렬
-  - 보고서 상세: 전체 분석 내용, Deep Value/Quality 점수 표시
-  - 기업 관리: CRUD, 검색, 필터링
-  - 관리자 대시보드: 분석 실행 UI, 실시간 상태 폴링
-
-- [x] **ISR 재검증 웹훅**
-  - 백엔드: 보고서 발행 시 프론트엔드 호출
-  - 프론트엔드: `/api/revalidate` 구현
-  - Secret 토큰 검증
-
-- [ ] **데이터 시각화** - Phase 5로 이동
-  - Recharts 차트
-  - 밸류에이션 레이더 차트
-
-- [ ] **반응형 디자인** - Phase 6로 이동
-  - 모바일/태블릿 대응
-  - 다크 모드
-
-### 검증
-```bash
-# 프론트엔드 빌드
-cd frontend && npm run build
-
-# 보고서 페이지 확인
-# http://localhost:3000/reports/{slug}
-```
+### 주요 성과
+- ✅ 종목명 자동완성 검색
+- ✅ 재무실적 표시 (연간 6년 + 분기 8개)
+- ✅ 증분 데이터 수집 (중복 방지)
+- ✅ 억 원 단위 표시
+- ✅ 기존 AI 분석 코드 유지 (나중에 재사용)
 
 ---
 
-## Phase 5: 스케줄링 & 관리자 🚧 **다음 단계**
+## Phase 6: 데이터 시각화 📋 (계획)
 
-### 목표
-자동화 및 운영 도구 완성
+**예상 기간**: 2026-02
 
-### 구현 항목
-- [ ] **APScheduler 작업 정의** (`backend/app/scheduler/jobs.py`)
-  - 일일 주가 업데이트 (평일 18:00 KST)
-  - 일일 뉴스 스캔 (평일 08:00, 14:00 KST)
-  - 주간 전체 분석 (토요일 09:00 KST)
-  - 분기 재무 업데이트 (1/4/7/10월 15일)
+### 차트 라이브러리
+- Recharts 설치 및 설정
 
-- [ ] **스케줄러 프로세스 분리**
-  - `backend/app/scheduler/run.py` 완성
-  - Docker Compose profile 설정
-  - 다중 워커 동시 실행 방지
+### 재무 트렌드 차트
+- 매출액/영업이익/순이익 추세선
+- 연간 vs 분기 토글
+- 반응형 디자인
 
-- [ ] **관리자 대시보드** (`frontend/src/app/admin/`)
-  - 분석 실행 모니터링
-  - 수동 분석 트리거
-  - 진행 중인 작업 상태 표시
-  - 에러 로그 조회
+### 주가 차트
+- OHLCV 차트
+- 이동평균선 (20일, 60일, 120일)
+- 거래량 막대 차트
 
-- [ ] **투자 철학 편집 UI** (`frontend/src/app/admin/knowledge/`)
-  - 마크다운 에디터 통합 (react-markdown-editor)
-  - 백엔드 API: `GET/PUT /api/v1/admin/knowledge/{filename}`
-  - 실시간 미리보기
-  - 변경 이력 (Git 연동 선택 사항)
-
-### 검증
-```bash
-# 스케줄러 단독 실행
-docker compose --profile full up scheduler
-
-# 스케줄 작업 확인
-docker compose logs scheduler | grep "Executing job"
-```
+### 밸류에이션 차트
+- PER, PBR 추세
+- 업종 평균 대비 비교
+- 레이더 차트 (Deep Value vs Quality 점수)
 
 ---
 
-## Phase 6: 배포 📋 **계획됨**
+## Phase 7: AI 분석 재활성화 📋 (계획)
 
-### 목표
-프로덕션 환경 배포 및 모니터링
+**예상 기간**: 2026-03
 
-### 구현 항목
-- [ ] **백엔드 배포**
-  - Koyeb / Railway / Fly.io 선택
-  - 환경 변수 설정
-  - 도메인 연결
+### 기존 에이전트 재사용
+- Phase 3에서 구현한 LangGraph 파이프라인 활용
+- `agents/` 폴더 코드 재활성화
 
-- [ ] **프론트엔드 배포**
-  - Vercel 배포
-  - 환경 변수 설정 (NEXT_PUBLIC_API_URL)
-  - 도메인 연결
+### 투자 보고서 생성
+- 관리자 대시보드에서 분석 실행
+- 백그라운드 작업으로 보고서 생성
+- 보고서 페이지에서 확인
 
-- [ ] **데이터베이스**
-  - Neon / Supabase Managed PostgreSQL
-  - 백업 설정
-  - 마이그레이션 실행
+### 스케줄링 (APScheduler)
+- 일일 주가 업데이트
+- 주간 전체 분석
+- 분기 재무 업데이트
 
-- [ ] **에러 모니터링**
-  - Sentry 연동
-  - 알림 설정
-  - 에러 대시보드
-
-- [ ] **로깅**
-  - 구조화된 JSON 로그
-  - 로그 레벨 설정
-  - 로그 보관 정책
-
-- [ ] **성능 최적화**
-  - DB 인덱스 최적화
-  - API 응답 캐싱
-  - CDN 설정 (프론트엔드)
-
-### 검증
-```bash
-# 프로덕션 헬스 체크
-curl https://api.agent-vi.com/api/v1/health
-
-# 프론트엔드 접속
-# https://agent-vi.com
-```
+### 투자 철학 편집 UI
+- Markdown 에디터 추가
+- 실시간 미리보기
+- 변경 이력 (선택사항)
 
 ---
 
-## 마일스톤
+## Phase 8: 배포 & 최적화 📋 (계획)
 
-| Phase | 설명 | 상태 |
-|-------|------|------|
-| Phase 1 | 프로젝트 기반 구축 | ✅ 완료 |
-| Phase 2 | 데이터 소스 & LLM | ✅ 완료 |
-| Phase 3 | 에이전트 파이프라인 | ✅ 완료 |
-| Phase 4 | API & 프론트엔드 | ✅ 완료 |
-| Phase 5 | 스케줄링 & 관리자 | 🚧 다음 단계 |
-| Phase 6 | 배포 | 📋 계획됨 |
+**예상 기간**: 2026-04
 
-**진행률**: 약 85% (Phase 1~4 완료)
+### 백엔드 배포
+- Koyeb / Railway / Fly.io
+- 환경 변수 설정
+- 도메인 연결
+
+### 프론트엔드 배포
+- Vercel 배포
+- ISR 설정 최적화
+- 도메인 연결
+
+### 데이터베이스
+- Neon / Supabase
+- 백업 설정
+- 인덱스 최적화
+
+### 모니터링
+- Sentry 연동
+- 로깅 시스템
+- 알림 설정
+
+### 성능 최적화
+- DB 쿼리 최적화
+- API 응답 캐싱
+- CDN 설정
 
 ---
 
-## 핵심 구현 파일 우선순위
+## 장기 목표 (2026 H2)
 
-### 완료된 핵심 파일
-- ✅ `backend/app/data_sources/dart_client.py` - DART 재무 데이터
-- ✅ `backend/app/agents/graph.py` - LangGraph 파이프라인 핵심
-- ✅ `backend/app/agents/valuation/agent.py` - knowledge base 로딩
-- ✅ `frontend/src/app/reports/[slug]/page.tsx` - 보고서 상세 페이지
-- ✅ `backend/app/services/analysis_service.py` - 분석 서비스
+### 고급 분석 기능
+- 업종 비교 분석
+- 동종 업계 벤치마킹
+- 시계열 예측 (매출/이익)
 
-### 다음 구현 파일
-- 📋 `backend/app/scheduler/jobs.py` - 스케줄링 작업 정의
-- 📋 `backend/app/api/v1/admin.py` - 관리자 API (knowledge 편집)
+### 포트폴리오 관리
+- 관심 종목 포트폴리오
+- 수익률 추적
+- 알림 설정
+
+### 커뮤니티 기능
+- 투자 아이디어 공유
+- 보고서 댓글
+- 사용자 평점
 
 ---
 
-## 참고 문서
+## 완료 상황
 
-- [아키텍처 문서](./docs/architecture.md) - 시스템 설계 상세
-- [계획서](/.claude/plans/sprightly-jumping-firefly.md) - 초기 설계 문서
-- README.md - 프로젝트 소개 및 빠른 시작
+- ✅ Phase 1: 프로젝트 기반 구축
+- ✅ Phase 2: 데이터 소스 & LLM
+- ✅ Phase 3: 에이전트 파이프라인
+- ✅ Phase 4: API & 프론트엔드
+- ✅ Phase 5: 재무실적 뷰어 MVP
+- 📋 Phase 6: 데이터 시각화 (다음 단계)
+- 📋 Phase 7: AI 분석 재활성화
+- 📋 Phase 8: 배포 & 최적화

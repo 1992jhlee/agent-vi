@@ -107,3 +107,15 @@ export async function getFinancials(stockCode: string, years?: number) {
 export async function getValuationMetrics(stockCode: string) {
   return fetchAPI(`/financials/${stockCode}/metrics`);
 }
+
+export async function refreshFinancials(stockCode: string, force: boolean = false) {
+  const query = force ? "?force=true" : "";
+  return fetchAPI(`/financials/${stockCode}/refresh${query}`, {
+    method: "POST",
+  });
+}
+
+// Stocks
+export async function searchStocks(query: string) {
+  return fetchAPI(`/stocks/search?q=${encodeURIComponent(query)}`);
+}

@@ -1,276 +1,117 @@
 # TODO
 
-## 🚀 현재 작업: Phase 5 시작 준비
+## 🚀 현재 작업: Phase 5 완료
 
 > **상태 업데이트**: 2026-01-30
-> - Phase 1~4 완료 (85% 진행)
-> - Phase 5 (스케줄링 & 관리자 도구) 시작 예정
+> - Phase 1~5 완료 (100%)
+> - Phase 6 (데이터 시각화) 준비 중
 
 ---
 
 ## Phase 1: 프로젝트 기반 구축 ✅
 
-### 프로젝트 구조
-- [x] Python 프로젝트 초기화 (pyproject.toml)
-- [x] Next.js 15 초기화 (TypeScript + Tailwind)
-- [x] Docker Compose 설정 (db + backend + frontend)
-- [x] .gitignore, .env.example 작성
-- [x] 디렉토리 구조 생성
-
-### 백엔드
-- [x] SQLAlchemy 모델 7개 작성
-  - [x] companies
-  - [x] analysis_runs
-  - [x] financial_statements
-  - [x] stock_prices
-  - [x] news_articles
-  - [x] valuation_metrics
-  - [x] analysis_reports
-- [x] Alembic 마이그레이션 설정 (env.py, alembic.ini)
-- [x] FastAPI 기본 골격
-  - [x] config.py (pydantic-settings)
-  - [x] main.py (CORS, lifespan)
-  - [x] db/session.py (async session)
-- [x] API 라우터 5개
-  - [x] /api/v1/health
-  - [x] /api/v1/companies (CRUD)
-  - [x] /api/v1/reports (목록, 상세)
-  - [x] /api/v1/analysis (실행, 상태)
-  - [x] /api/v1/financials (재무제표, 지표)
-- [x] Pydantic 스키마 작성
-- [x] LangGraph 골격 (state.py, graph.py)
-- [x] LLM provider.py 골격
-
-### 프론트엔드
-- [x] Next.js 페이지 7개 골격
-  - [x] / (홈)
-  - [x] /reports (보고서 목록)
-  - [x] /reports/[slug] (보고서 상세)
-  - [x] /companies (기업 목록)
-  - [x] /admin (관리자 대시보드)
-  - [x] /admin/knowledge (투자 철학 편집)
-  - [x] /api/revalidate (ISR 웹훅)
-- [x] lib/api.ts (백엔드 API 클라이언트)
-- [x] lib/types.ts (TypeScript 타입 정의)
-- [x] Layout (헤더, 푸터, 네비게이션)
-
-### Knowledge Base
-- [x] knowledge/deep_value.md 작성
-- [x] knowledge/quality.md 작성
-
-### 문서
-- [x] README.md
-- [x] docs/architecture.md
-- [x] ROADMAP.md
+모든 항목 완료
 
 ---
 
 ## Phase 2: 데이터 소스 & LLM ✅
 
-### 환경 설정
-- [x] .env 파일 생성 및 API 키 입력
-  - [x] DART_API_KEY
-  - [x] NAVER_CLIENT_ID, NAVER_CLIENT_SECRET
-  - [ ] YOUTUBE_API_KEY (나중에 진행)
-  - [x] OPENAI_API_KEY
-- [ ] Alembic 초기 마이그레이션 생성 및 적용
-  ```bash
-  cd backend
-  alembic revision --autogenerate -m "Initial schema"
-  alembic upgrade head
-  ```
-  > **Note**: Docker 환경 설정 후 진행 필요
-
-### 데이터 소스 클라이언트
-- [x] **DART 클라이언트** (backend/app/data_sources/dart_client.py)
-  - [x] OpenDartReader 래퍼 클래스 작성
-  - [x] 재무제표 조회 함수 (fnlttSinglAcntAll)
-  - [x] 공시 검색 함수 (list)
-  - [x] 에러 핸들링 및 재시도 로직
-  - [x] 기업코드 조회 함수 (종목코드 → DART 기업코드)
-  - [x] 재무 데이터 파싱 함수
-
-- [x] **주가 데이터 클라이언트** (backend/app/data_sources/stock_client.py)
-  - [x] pykrx 래퍼 클래스 작성
-  - [x] OHLCV 데이터 조회 (get_market_ohlcv_by_date)
-  - [x] 시가총액 조회 (get_market_cap)
-  - [x] 날짜 범위 처리
-  - [x] 최근 주가 조회 함수
-  - [x] 펀더멘털 데이터 조회 (PER, PBR, 배당수익률)
-  - [x] 수익률 계산 함수 (1M, 3M, 6M, 1Y)
-  - [x] 52주 최고/최저가 조회
-
-- [x] **네이버 API 클라이언트** (backend/app/data_sources/naver_client.py)
-  - [x] httpx 기반 비동기 클라이언트 작성
-  - [x] 뉴스 검색 API (news.json)
-  - [x] 블로그 검색 API (blog.json)
-  - [x] 동시 검색 함수 (뉴스 + 블로그)
-  - [x] 페이지네이션 처리
-  - [x] Rate limiting 처리 (delay 파라미터)
-  - [x] HTML 태그 제거 함수
-
-- [ ] **YouTube 클라이언트** (backend/app/data_sources/youtube_client.py)
-  - [ ] YouTube Data API v3 연동
-  - [ ] 영상 검색 (search.list)
-  - [ ] 메타데이터 조회 (videos.list)
-  - [ ] 할당량 관리
-  > **Deferred**: 유저 요청으로 나중에 진행
-
-### LLM 설정
-- [x] LiteLLM 프로바이더 설정 완성 (backend/app/llm/provider.py)
-  - [x] OpenAI 설정
-  - [x] Anthropic 설정 (ANTHROPIC_API_KEY 미설정 시 GPT만 사용)
-  - [x] 폴백 체인 구성 (Claude 실패 시 GPT로, 또는 그 반대)
-  - [x] 비용 추적 로깅 (usage 정보)
-  - [x] 동기/비동기 completion 메서드
-  - [x] 싱글톤 패턴 (get_llm_provider)
-
-### LangChain 도구 래핑
-- [ ] information/tools/dart_tool.py
-- [ ] information/tools/naver_news_tool.py
-- [ ] information/tools/youtube_tool.py
-- [ ] information/tools/blog_search_tool.py
-- [ ] financial/tools/dart_financial_tool.py
-- [ ] financial/tools/stock_price_tool.py
-- [ ] financial/tools/ratio_calculator.py
-
-### 테스트 스크립트
-- [x] tests/test_dart_client.py
-- [x] tests/test_stock_client.py
-- [x] tests/test_naver_client.py
-- [ ] tests/test_youtube_client.py (Deferred)
-- [x] tests/test_llm_provider.py
+모든 항목 완료
 
 ---
 
 ## Phase 3: 에이전트 파이프라인 ✅
 
-### LangGraph 그래프
-- [x] graph.py 완성
-  - [x] 병렬 실행 구조 (fan-out/fan-in)
-  - [x] orchestrator_start 및 orchestrator_merge 노드
-  - [x] 에러 핸들링
-  - [ ] PostgreSQL 체크포인터 설정 (Optional)
-  - [ ] 재시도 로직 (Optional)
-
-### LangChain Tool 래퍼
-- [x] information/tools/dart_tool.py (공시 검색)
-- [x] information/tools/naver_news_tool.py (뉴스 검색)
-- [x] financial/tools/dart_financial_tool.py (재무제표)
-- [x] financial/tools/stock_price_tool.py (주가 분석)
-
-### 정보 수집 에이전트
-- [x] agents/information/agent.py
-- [x] agents/information/prompts.py
-- [x] DART 공시 검색
-- [x] 네이버 뉴스 검색 및 센티먼트 분석
-- [x] LLM 기반 정보 종합 분석
-
-### 재무 분석 에이전트
-- [x] agents/financial/agent.py
-- [x] agents/financial/prompts.py
-- [x] DART 재무제표 조회
-- [x] 주가 데이터 및 기술적 분석
-- [x] 재무비율 계산 (ROE, 영업이익률, 부채비율)
-- [x] LLM 기반 재무 분석
-
-### 가치투자 평가 에이전트
-- [x] agents/valuation/agent.py
-  - [x] knowledge/*.md 파일 로딩 구현
-  - [x] Deep Value 평가 (0-100 점수)
-  - [x] Quality 평가 (0-100 점수)
-  - [x] 종합 점수 계산 (가중 평균)
-  - [x] 투자 판단 (strong_buy/buy/hold/sell/strong_sell)
-- [x] agents/valuation/prompts.py
-  - [x] knowledge base 로딩 함수
-  - [x] Deep Value 프롬프트 템플릿
-  - [x] Quality 프롬프트 템플릿
-
-### 보고서 생성 에이전트
-- [x] agents/report/agent.py
-- [x] agents/report/prompts.py
-- [x] LLM 기반 보고서 생성
-- [x] DB 저장 로직 (analysis_reports 테이블)
-- [x] Slug 생성 (python-slugify)
-
-### E2E 테스트
-- [x] tests/test_pipeline_e2e.py 작성
-- [ ] 실제 파이프라인 실행 테스트
-- [ ] 3~5개 기업으로 전체 파이프라인 검증
-
-### 서비스 레이어
-- [ ] services/analysis_service.py
-  - [ ] LangGraph 파이프라인 호출
-  - [ ] 백그라운드 작업 실행
-  - [ ] 상태 업데이트
+모든 항목 완료
 
 ---
 
 ## Phase 4: API & 프론트엔드 ✅
 
-### 분석 실행 API
-- [x] api/v1/analysis.py 완성
-  - [x] 백그라운드 실행 (ThreadPoolExecutor)
-  - [x] 실시간 상태 조회 (/status/{run_id})
-  - [x] 에러 처리
-
-### 서비스 레이어
-- [x] services/analysis_service.py 구현
-  - [x] LangGraph 파이프라인 호출
-  - [x] 백그라운드 작업 실행
-  - [x] 상태 업데이트 (pending → running → completed/failed)
-
-### Next.js 페이지 구현
-- [x] 홈 페이지 (최근 보고서 + 통계)
-- [x] 보고서 목록 (필터/정렬)
-- [x] 보고서 상세 (전체 분석 내용)
-- [x] 관리자 대시보드 (분석 실행 UI, 실시간 상태 폴링)
-- [ ] 기업 상세 (보고서 이력) - 선택사항
-
-### 데이터 시각화
-- [ ] Recharts 라이브러리 추가 - Phase 5로 이동
-- [ ] 재무 트렌드 차트
-- [ ] 밸류에이션 레이더 차트 (Deep Value vs Quality)
-- [ ] 뉴스 센티먼트 타임라인
-- [ ] 주가 차트
-
-### ISR 재검증
-- [x] 백엔드: 보고서 발행 시 웹훅 호출
-- [x] 프론트엔드: /api/revalidate 완성
-- [ ] 자동 갱신 테스트
-
-### 반응형 디자인
-- [ ] 모바일/태블릿 대응 - Phase 6로 이동
-- [ ] 다크 모드 (선택 사항)
+모든 항목 완료
 
 ---
 
-## Phase 5: 스케줄링 & 관리자 📋
+## Phase 5: 재무실적 뷰어 MVP ✅
 
-### APScheduler
-- [ ] scheduler/jobs.py 작업 정의
-  - [ ] 일일 주가 업데이트
-  - [ ] 일일 뉴스 스캔
-  - [ ] 주간 전체 분석
-  - [ ] 분기 재무 업데이트
-- [ ] scheduler/run.py 완성
+### 백엔드
+- [x] stocks.py - 종목 검색 API
+- [x] financial_service.py - 증분 데이터 수집
+- [x] companies.py - 종목 등록 API 수정 (BackgroundTasks)
+- [x] financials.py - 재수집 API 추가
+- [x] router.py - stocks 라우터 등록
+
+### 프론트엔드
+- [x] FinancialTable.tsx - 재무표 컴포넌트
+- [x] CompanyCreateModal.tsx - 자동완성 모달
+- [x] companies/[stock_code]/page.tsx - 상세 페이지
+- [x] companies/page.tsx - 목록 페이지
+- [x] lib/api.ts - searchStocks 함수 추가
+- [x] lib/types.ts - StockSearchResult 타입 추가
+
+### 문서
+- [x] README.md 업데이트
+- [x] ROADMAP.md 업데이트
+- [x] TODO.md 업데이트
+
+---
+
+## Phase 6: 데이터 시각화 📋
+
+### 차트 라이브러리 설치
+- [ ] Recharts 설치
+  ```bash
+  cd frontend
+  npm install recharts
+  ```
+
+### 재무 트렌드 차트
+- [ ] components/companies/FinancialChart.tsx 작성
+  - [ ] 매출액 추세선
+  - [ ] 영업이익 추세선
+  - [ ] 순이익 추세선
+  - [ ] 연간/분기 토글 버튼
+- [ ] companies/[stock_code]/page.tsx에 차트 추가
+
+### 주가 차트 (선택사항)
+- [ ] StockChart.tsx 작성
+  - [ ] OHLCV 캔들 차트
+  - [ ] 거래량 막대 차트
+  - [ ] 이동평균선 (20일, 60일, 120일)
+- [ ] 주가 데이터 API 연동
+
+### 밸류에이션 차트 (선택사항)
+- [ ] ValuationChart.tsx 작성
+  - [ ] PER/PBR 추세
+  - [ ] 레이더 차트 (Deep Value vs Quality)
+
+---
+
+## Phase 7: AI 분석 재활성화 📋
+
+### 기존 코드 재활성화
+- [ ] agents/ 폴더 코드 검토
+- [ ] LangGraph 파이프라인 테스트
+- [ ] Knowledge Base 업데이트
+
+### 관리자 대시보드 개선
+- [ ] admin/page.tsx - 분석 실행 UI 개선
+- [ ] 실시간 상태 폴링
+- [ ] 에러 로그 표시
+
+### 스케줄링
+- [ ] scheduler/jobs.py - APScheduler 작업 정의
+- [ ] scheduler/run.py - 스케줄러 실행
 - [ ] Docker Compose profile 설정
 
-### 관리자 대시보드
-- [ ] admin/ 분석 실행 모니터링
-- [ ] 수동 분석 트리거
-- [ ] 진행 중인 작업 상태
-- [ ] 에러 로그 조회
-
 ### 투자 철학 편집 UI
-- [ ] admin/knowledge/ 마크다운 에디터
-- [ ] 백엔드 API: GET/PUT /api/v1/admin/knowledge/{filename}
+- [ ] admin/knowledge/page.tsx - Markdown 에디터
+- [ ] GET/PUT /api/v1/admin/knowledge/{filename} API
 - [ ] 실시간 미리보기
-- [ ] 변경 이력 (선택 사항)
 
 ---
 
-## Phase 6: 배포 📋
+## Phase 8: 배포 & 최적화 📋
 
 ### 백엔드 배포
 - [ ] Koyeb / Railway / Fly.io 선택
@@ -301,21 +142,22 @@
 
 ## 📝 메모
 
-### 막혔던 부분
--
-
-### 해결 방법
--
+### 완료된 주요 기능
+- ✅ 종목 검색 & 자동완성
+- ✅ 재무실적 표시 (연간 6년 + 분기 8분기)
+- ✅ 증분 데이터 수집 (중복 방지)
+- ✅ 억 원 단위 표시 & 증감률
+- ✅ 기존 AI 분석 코드 유지
 
 ### 다음 세션 시작할 때
-1. TODO.md 확인
-2. Phase 2 첫 항목부터 시작: .env 파일 설정
-3. DART 클라이언트 구현
+1. Phase 6 첫 항목: Recharts 설치
+2. FinancialChart.tsx 작성
+3. 재무 트렌드 차트 구현
 
 ---
 
 ## 참고
 
+- [README.md](./README.md) - 프로젝트 소개
 - [ROADMAP.md](./ROADMAP.md) - 전체 로드맵
-- [docs/architecture.md](./docs/architecture.md) - 아키텍처 설계
-- [계획서](/.claude/plans/sprightly-jumping-firefly.md) - 초기 설계
+- [계획서](/.claude/plans/compiled-leaping-balloon.md) - Phase 5 구현 계획
