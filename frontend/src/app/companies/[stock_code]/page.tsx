@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import Link from "next/link";
 import { getCompany, getFinancials } from "@/lib/api";
 import FinancialTable from "@/components/companies/FinancialTable";
 
@@ -32,6 +33,29 @@ export default async function CompanyDetailPage({ params }: Props) {
 
     return (
       <div className="container mx-auto px-4 py-8">
+        {/* 뒤로 가기 버튼 */}
+        <div className="mb-6">
+          <Link
+            href="/companies"
+            className="inline-flex items-center text-blue-600 hover:text-blue-800 transition-colors"
+          >
+            <svg
+              className="w-5 h-5 mr-2"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M10 19l-7-7m0 0l7-7m-7 7h18"
+              />
+            </svg>
+            목록으로 돌아가기
+          </Link>
+        </div>
+
         <div className="mb-8">
           <h1 className="text-3xl font-bold mb-2">{company.company_name}</h1>
           <p className="text-gray-600">

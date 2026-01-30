@@ -71,7 +71,9 @@ async def collect_financial_data(
     targets = []
 
     # 1. 연간 실적 (최근 6년)
-    for year in range(current_year - 5, current_year + 1):
+    # 현재 연도와 다음 연도는 아직 사업보고서가 없을 수 있으므로
+    # 여유있게 8년치를 시도하고 성공한 것만 저장 (최대 6년치)
+    for year in range(current_year - 7, current_year + 1):
         if (year, 4) not in existing:
             targets.append((year, 4, "annual"))
 
@@ -79,12 +81,14 @@ async def collect_financial_data(
     # 현재 분기 계산
     current_quarter = (current_month - 1) // 3 + 1
 
-    # 최근 8개 분기 생성
+    # 최근 분기 생성 (Q4 제외하므로 더 많이 탐색)
     quarters = []
     year = current_year
     quarter = current_quarter
+    count = 0
 
-    for _ in range(8):
+    # 8개의 분기 데이터를 찾을 때까지 또는 최대 15개 분기를 탐색
+    for _ in range(15):
         quarter -= 1
         if quarter == 0:
             quarter = 4
@@ -93,6 +97,9 @@ async def collect_financial_data(
         # 4분기는 연간 실적이므로 제외
         if quarter != 4:
             quarters.append((year, quarter))
+            count += 1
+            if count >= 8:
+                break
 
     # 분기 실적 타겟 추가
     for year, quarter in quarters:
@@ -134,13 +141,17 @@ async def collect_financial_data(
                 failed += 1
                 continue
 
+            # 메타데이터 분리
+            metadata = data.pop("_metadata", {})
+
             # DB 저장
             await save_financial_statement(
                 company_id=company_id,
                 fiscal_year=year,
                 fiscal_quarter=quarter,
                 report_type="annual" if quarter == 4 else "quarterly",
-                data=data
+                data=data,
+                metadata=metadata
             )
 
             collected += 1
@@ -176,7 +187,8 @@ async def save_financial_statement(
     fiscal_year: int,
     fiscal_quarter: int,
     report_type: str,
-    data: dict
+    data: dict,
+    metadata: dict = None
 ):
     """
     재무제표 데이터를 DB에 저장 (upsert)
@@ -187,6 +199,7 @@ async def save_financial_statement(
         fiscal_quarter: 분기 (1-4)
         report_type: "annual" 또는 "quarterly"
         data: 파싱된 재무 데이터
+        metadata: 메타데이터 (추정 여부 등)
     """
     async with async_session_factory() as session:
         stmt = pg_insert(FinancialStatement).values(
@@ -205,7 +218,7 @@ async def save_financial_statement(
             financing_cash_flow=data.get("financing_cash_flow"),
             dividends_paid=None,  # 현재 파싱 안 됨
             shares_outstanding=None,  # 현재 파싱 안 됨
-            raw_data_json=None  # 필요 시 추가
+            raw_data_json=metadata or {}  # 메타데이터 저장
         )
 
         # Unique constraint 충돌 시 업데이트

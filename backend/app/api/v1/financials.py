@@ -48,6 +48,7 @@ async def get_financial_statements(
                 "financing_cash_flow": s.financing_cash_flow,
                 "dividends_paid": s.dividends_paid,
                 "shares_outstanding": s.shares_outstanding,
+                "metadata": s.raw_data_json or {},
             }
             for s in statements
         ],
