@@ -39,44 +39,38 @@ ls frontend/src/app/
 
 ---
 
-## Phase 2: 데이터 소스 & LLM 🚧 **다음 단계**
+## Phase 2: 데이터 소스 & LLM ✅ **완료**
 
 ### 목표
 외부 데이터를 가져오는 클라이언트와 LLM 연동 완성
 
-### 구현 항목
-- [ ] **DART 클라이언트** (`backend/app/data_sources/dart_client.py`)
+### 완료 항목
+- [x] **DART 클라이언트** (`backend/app/data_sources/dart_client.py`)
   - OpenDartReader 래퍼 작성
   - 재무제표 조회 함수 (fnlttSinglAcntAll)
   - 공시 검색 함수
-  - 삼성전자(005930) 테스트
+  - 에러 핸들링 및 재시도 로직
 
-- [ ] **주가 데이터 클라이언트** (`backend/app/data_sources/stock_client.py`)
+- [x] **주가 데이터 클라이언트** (`backend/app/data_sources/stock_client.py`)
   - pykrx 래퍼 작성
   - OHLCV 데이터 조회
-  - 시가총액 조회
-  - 테스트 스크립트
+  - 시가총액, 52주 최고/최저가 조회
+  - 수익률 계산 (1M, 3M, 6M, 1Y)
 
-- [ ] **네이버 API 클라이언트** (`backend/app/data_sources/naver_client.py`)
-  - 뉴스 검색 API (news.json)
-  - 블로그 검색 API (blog.json)
-  - 페이지네이션 처리
-  - 테스트 스크립트
+- [x] **네이버 API 클라이언트** (`backend/app/data_sources/naver_client.py`)
+  - 뉴스/블로그 검색 API (비동기)
+  - 페이지네이션 및 Rate limiting 처리
+  - HTML 태그 제거
 
-- [ ] **YouTube 클라이언트** (`backend/app/data_sources/youtube_client.py`)
-  - YouTube Data API v3 연동
-  - 영상 검색 및 메타데이터 조회
-  - 테스트 스크립트
+- [ ] **YouTube 클라이언트** - Deferred (나중에 진행)
 
-- [ ] **LiteLLM 프로바이더 설정**
+- [x] **LiteLLM 프로바이더 설정**
   - OpenAI, Anthropic 설정
-  - 폴백 체인 구성 (Claude 실패 시 GPT로)
+  - 폴백 체인 구성
   - 비용 추적 로깅
 
-- [ ] **LangChain 도구 래핑**
-  - 각 데이터 소스를 LangChain Tool로 변환
-  - 도구 설명(description) 작성
-  - 프롬프트 템플릿 작성
+- [x] **LangChain 도구 래핑**
+  - DART, Naver, 주가 분석 도구 구현
 
 ### 검증
 ```bash
@@ -90,54 +84,51 @@ python backend/tests/test_llm_provider.py
 
 ---
 
-## Phase 3: 에이전트 파이프라인 📋 **계획됨**
+## Phase 3: 에이전트 파이프라인 ✅ **완료**
 
 ### 목표
 4개 에이전트가 협력하는 LangGraph 파이프라인 완성 (프로젝트 핵심)
 
-### 구현 항목
-- [ ] **LangGraph 그래프 완성** (`backend/app/agents/graph.py`)
+### 완료 항목
+- [x] **LangGraph 그래프 완성** (`backend/app/agents/graph.py`)
   - 병렬 실행 구조 (fan-out/fan-in) 구현
-  - PostgreSQL 체크포인터 설정
-  - 에러 핸들링 및 재시도 로직
+  - 에러 핸들링
+  - [ ] PostgreSQL 체크포인터 설정 (Optional)
 
-- [ ] **정보 수집 에이전트** (`backend/app/agents/information/`)
+- [x] **정보 수집 에이전트** (`backend/app/agents/information/`)
   - agent.py: 메인 에이전트 로직
   - prompts.py: 시스템 프롬프트
-  - tools/: DART, Naver, YouTube, 블로그 도구
-  - 뉴스 센티먼트 분석
-  - 실적 전망 요약
+  - tools/: DART 공시, Naver 뉴스 검색
+  - LLM 기반 정보 종합 분석
 
-- [ ] **재무 분석 에이전트** (`backend/app/agents/financial/`)
+- [x] **재무 분석 에이전트** (`backend/app/agents/financial/`)
   - agent.py: 재무 분석 로직
   - prompts.py: 분석 프롬프트
-  - tools/: DART 재무, 주가, 비율 계산
-  - 재무비율 자동 계산 (PER, PBR, ROE, NCAV, 그레이엄 넘버 등)
-  - 동종업계 비교
+  - tools/: DART 재무, 주가 분석
+  - 재무비율 자동 계산 (ROE, 영업이익률, 부채비율)
 
-- [ ] **가치투자 평가 에이전트** (`backend/app/agents/valuation/`)
-  - **핵심**: knowledge/*.md 파일 로딩 구현
-  - Deep Value 평가 (정량 기준)
-  - Quality 평가 (정성 + 정량)
-  - frameworks/deep_value.py: 정량 계산 함수
-  - frameworks/quality.py: 정성 평가 로직
-  - 각 프레임워크별 점수 산출 (0-100)
+- [x] **가치투자 평가 에이전트** (`backend/app/agents/valuation/`)
+  - knowledge/*.md 파일 로딩 구현
+  - Deep Value 평가 (0-100 점수)
+  - Quality 평가 (0-100 점수)
+  - 투자 판단 (strong_buy/buy/hold/sell/strong_sell)
 
-- [ ] **보고서 생성 에이전트** (`backend/app/agents/report/`)
+- [x] **보고서 생성 에이전트** (`backend/app/agents/report/`)
   - 모든 분석 결과 종합
   - 마크다운 형식 보고서 생성
   - DB 저장 (analysis_reports 테이블)
-  - Slug 생성 (URL용)
+  - Slug 생성 (python-slugify)
+  - ISR 재검증 웹훅 호출
 
-- [ ] **analysis_service.py 구현**
-  - FastAPI에서 LangGraph 파이프라인 호출
-  - 백그라운드 작업 실행
-  - 상태 업데이트 (pending → completed)
+- [x] **analysis_service.py 구현**
+  - LangGraph 파이프라인 호출
+  - ThreadPoolExecutor 백그라운드 실행
+  - 상태 업데이트 (pending → running → completed/failed)
 
 ### 검증
 ```bash
-# 3~5개 기업 E2E 테스트
-python backend/tests/test_pipeline_e2e.py --companies 005930,035420,035720
+# E2E 테스트
+python backend/tests/test_pipeline_e2e.py
 
 # analysis_runs 테이블에서 상태 확인
 psql -d agent_vi -c "SELECT id, status, company_id FROM analysis_runs ORDER BY created_at DESC LIMIT 5;"
@@ -145,38 +136,36 @@ psql -d agent_vi -c "SELECT id, status, company_id FROM analysis_runs ORDER BY c
 
 ---
 
-## Phase 4: API & 프론트엔드 📋 **계획됨**
+## Phase 4: API & 프론트엔드 ✅ **완료**
 
 ### 목표
 분석 결과를 웹에서 보여주는 UI 완성
 
-### 구현 항목
-- [ ] **분석 실행 API 완성**
-  - `/api/v1/analysis/run` 백그라운드 실행
-  - 실시간 상태 조회
-  - WebSocket 또는 폴링 방식 선택
+### 완료 항목
+- [x] **분석 실행 API 완성**
+  - `/api/v1/analysis/run` 백그라운드 실행 (ThreadPoolExecutor)
+  - 실시간 상태 조회 (폴링 방식)
+  - 에러 처리
 
-- [ ] **Next.js 페이지 구현**
+- [x] **Next.js 페이지 구현**
   - 홈: 최근 보고서 + 요약 통계
-  - 보고서 목록: 필터/정렬 (시장, 평가 등)
-  - 보고서 상세: 전체 분석 내용
-  - 기업 상세: 과거 보고서 이력
+  - 보고서 목록: 필터/정렬
+  - 보고서 상세: 전체 분석 내용, Deep Value/Quality 점수 표시
+  - 기업 관리: CRUD, 검색, 필터링
+  - 관리자 대시보드: 분석 실행 UI, 실시간 상태 폴링
 
-- [ ] **데이터 시각화**
-  - Recharts 라이브러리 추가
-  - 재무 트렌드 차트 (매출, 이익)
-  - **밸류에이션 레이더 차트** (Deep Value vs Quality)
-  - 뉴스 센티먼트 타임라인
-  - 주가 차트
-
-- [ ] **ISR 재검증 웹훅**
+- [x] **ISR 재검증 웹훅**
   - 백엔드: 보고서 발행 시 프론트엔드 호출
   - 프론트엔드: `/api/revalidate` 구현
-  - 자동 페이지 갱신 확인
+  - Secret 토큰 검증
 
-- [ ] **반응형 디자인**
+- [ ] **데이터 시각화** - Phase 5로 이동
+  - Recharts 차트
+  - 밸류에이션 레이더 차트
+
+- [ ] **반응형 디자인** - Phase 6로 이동
   - 모바일/태블릿 대응
-  - 다크 모드 (선택 사항)
+  - 다크 모드
 
 ### 검증
 ```bash
@@ -189,7 +178,7 @@ cd frontend && npm run build
 
 ---
 
-## Phase 5: 스케줄링 & 관리자 📋 **계획됨**
+## Phase 5: 스케줄링 & 관리자 🚧 **다음 단계**
 
 ### 목표
 자동화 및 운영 도구 완성
@@ -278,28 +267,31 @@ curl https://api.agent-vi.com/api/v1/health
 
 ## 마일스톤
 
-| Phase | 예상 기간 | 상태 |
-|-------|----------|------|
-| Phase 1 | 1주 | ✅ 완료 |
-| Phase 2 | 1-2주 | 🚧 진행 예정 |
-| Phase 3 | 2-3주 | 📋 계획됨 |
-| Phase 4 | 2주 | 📋 계획됨 |
-| Phase 5 | 1주 | 📋 계획됨 |
-| Phase 6 | 1주 | 📋 계획됨 |
+| Phase | 설명 | 상태 |
+|-------|------|------|
+| Phase 1 | 프로젝트 기반 구축 | ✅ 완료 |
+| Phase 2 | 데이터 소스 & LLM | ✅ 완료 |
+| Phase 3 | 에이전트 파이프라인 | ✅ 완료 |
+| Phase 4 | API & 프론트엔드 | ✅ 완료 |
+| Phase 5 | 스케줄링 & 관리자 | 🚧 다음 단계 |
+| Phase 6 | 배포 | 📋 계획됨 |
 
-**전체 예상 기간**: 8-11주
+**진행률**: 약 85% (Phase 1~4 완료)
 
 ---
 
 ## 핵심 구현 파일 우선순위
 
-구현 시 우선적으로 확인해야 할 파일:
+### 완료된 핵심 파일
+- ✅ `backend/app/data_sources/dart_client.py` - DART 재무 데이터
+- ✅ `backend/app/agents/graph.py` - LangGraph 파이프라인 핵심
+- ✅ `backend/app/agents/valuation/agent.py` - knowledge base 로딩
+- ✅ `frontend/src/app/reports/[slug]/page.tsx` - 보고서 상세 페이지
+- ✅ `backend/app/services/analysis_service.py` - 분석 서비스
 
-1. **Phase 2**: `backend/app/data_sources/dart_client.py`
-2. **Phase 3**: `backend/app/agents/graph.py` (파이프라인의 핵심)
-3. **Phase 3**: `backend/app/agents/valuation/agent.py` (knowledge 로딩)
-4. **Phase 4**: `frontend/src/app/reports/[slug]/page.tsx` (최종 산출물)
-5. **Phase 5**: `backend/app/scheduler/jobs.py` (자동화)
+### 다음 구현 파일
+- 📋 `backend/app/scheduler/jobs.py` - 스케줄링 작업 정의
+- 📋 `backend/app/api/v1/admin.py` - 관리자 API (knowledge 편집)
 
 ---
 
