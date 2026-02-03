@@ -21,15 +21,18 @@ export default function CompanyCreateModal({ isOpen, onClose, onSuccess }: Props
   const [suggestions, setSuggestions] = useState<StockSearchResult[]>([]);
   const [selected, setSelected] = useState<StockSearchResult | null>(null);
   const [loading, setLoading] = useState(false);
+  const [searching, setSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // 종목 검색 (디바운싱)
   useEffect(() => {
     if (query.length < 1) {
       setSuggestions([]);
+      setSearching(false);
       return;
     }
 
+    setSearching(true);
     const timer = setTimeout(async () => {
       try {
         const res = await fetch(`${API_BASE}/api/v1/stocks/search?q=${encodeURIComponent(query)}`);
@@ -39,10 +42,15 @@ export default function CompanyCreateModal({ isOpen, onClose, onSuccess }: Props
         }
       } catch (e) {
         console.error("검색 실패:", e);
+      } finally {
+        setSearching(false);
       }
     }, 300);
 
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      setSearching(false);
+    };
   }, [query]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -91,16 +99,42 @@ export default function CompanyCreateModal({ isOpen, onClose, onSuccess }: Props
             <label className="block text-sm font-medium mb-2">
               종목명 또는 종목코드 <span className="text-red-500">*</span>
             </label>
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => {
-                setQuery(e.target.value);
-                setSelected(null);
-              }}
-              placeholder="예: 삼성전자, 005930"
-              className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
+            <div className="relative">
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => {
+                  setQuery(e.target.value);
+                  setSelected(null);
+                }}
+                placeholder="예: 삼성전자, 005930"
+                className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              {searching && (
+                <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                  <svg
+                    className="animate-spin h-5 w-5 text-blue-600"
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    ></circle>
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                    ></path>
+                  </svg>
+                </div>
+              )}
+            </div>
 
             {/* 자동완성 드롭다운 */}
             {suggestions.length > 0 && !selected && (

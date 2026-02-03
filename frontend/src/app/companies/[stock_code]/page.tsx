@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { getCompany, getFinancials } from "@/lib/api";
 import FinancialTable from "@/components/companies/FinancialTable";
+import RefreshFinancialButton from "@/components/companies/RefreshFinancialButton";
 
 interface Props {
   params: Promise<{ stock_code: string }>;
@@ -63,6 +64,16 @@ export default async function CompanyDetailPage({ params }: Props) {
             {company.sector && ` · ${company.sector}`}
           </p>
         </div>
+
+        {/* 재무 데이터 갱신 버튼 */}
+        {(annualData.length === 0 || quarterlyData.length === 0) && (
+          <div className="mb-8 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+            <p className="text-sm text-yellow-800 mb-3">
+              재무 데이터가 없거나 부족합니다. 아래 버튼을 눌러 데이터를 수집해주세요.
+            </p>
+            <RefreshFinancialButton stockCode={stock_code} />
+          </div>
+        )}
 
         {/* 연간 실적 */}
         <section className="mb-12">
