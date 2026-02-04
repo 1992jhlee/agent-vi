@@ -260,58 +260,91 @@ _QUARTER_END = {1: (3, 31), 2: (6, 30), 3: (9, 30), 4: (12, 31)}
 
 async def update_per_pbr(company_id: int, stock_code: str):
     """
-    DB의 재무데이터에 대해 pykrx에서 PER/PBR를 수집하여 업데이트합니다.
-    각 분기의 종료일 기준 가장 가까운 거래일의 PER/PBR를 사용합니다.
+    DB의 재무데이터에 대해 PER/PBR를 계산하여 업데이트합니다.
+
+    - PBR: 모든 기간에서 시가총액 / total_equity로 직접 계산 (잔액 기반)
+    - PER (Q4/연간): 시가총액 / net_income으로 직접 계산 (당해연도 실적 기반)
+    - PER (Q1-Q3): pykrx trailing PER 사용 (누적 실적으로 단순 연산 불가)
     """
-    # DB에서 기존 재무데이터의 (year, quarter) 목록 조회
+    # DB에서 재무데이터와 필요한 컬럼 조회
     async with async_session_factory() as session:
         result = await session.execute(
-            select(FinancialStatement.fiscal_year, FinancialStatement.fiscal_quarter)
+            select(
+                FinancialStatement.fiscal_year,
+                FinancialStatement.fiscal_quarter,
+                FinancialStatement.net_income,
+                FinancialStatement.total_equity,
+            )
             .where(FinancialStatement.company_id == company_id)
         )
-        periods = result.all()
+        rows = result.all()
 
-    if not periods:
+    if not rows:
         return
 
-    # 분기별 종료일 계산
+    # 분기별 종료일 및 재무 실적 매핑
     period_dates: dict[tuple[int, int], str] = {}
-    for year, quarter in periods:
+    period_financials: dict[tuple[int, int], dict] = {}
+    for year, quarter, net_income, total_equity in rows:
         month, day = _QUARTER_END[quarter]
         period_dates[(year, quarter)] = f"{year}{month:02d}{day:02d}"
+        period_financials[(year, quarter)] = {
+            "net_income": net_income,
+            "total_equity": total_equity,
+        }
 
     min_date = min(period_dates.values())
     max_date = max(period_dates.values())
 
-    # pykrx에서 전체 범위의 펀더멘털 데이터 조회 (단일 API 호출)
     stock_client = StockClient()
-    fund_df = stock_client.get_fundamentals_range(stock_code, min_date, max_date)
 
-    if fund_df is None or fund_df.empty:
-        logger.warning(f"PER/PBR 수집 실패: {stock_code} - 펀더멘털 데이터 없음")
-        return
+    # 시가총액 범위 조회 (단일 API 호출) — PBR 및 Q4 PER 계산용
+    cap_df = stock_client.get_market_cap(stock_code, min_date, max_date)
+    has_cap_data = cap_df is not None and not cap_df.empty
+    if not has_cap_data:
+        logger.warning(f"시가총액 데이터 없음: {stock_code} — Q4 음수 순이익 PER null 세팅만 수행")
 
-    # 각 기간의 종료일 이하 가장 가까운 거래일의 PER/PBR 추출
     updates: dict[tuple[int, int], dict] = {}
-    for (year, quarter), date_str in period_dates.items():
-        target_dt = pd.Timestamp(date_str)
-        valid_dates = fund_df.index[fund_df.index <= target_dt]
-        if len(valid_dates) == 0:
-            continue
 
-        row = fund_df.loc[valid_dates[-1]]
+    for (year, quarter), date_str in period_dates.items():
+        net_income = period_financials[(year, quarter)]["net_income"]
+        total_equity = period_financials[(year, quarter)]["total_equity"]
         set_clause = {}
 
-        per_val = row.get("PER")
-        if pd.notna(per_val) and float(per_val) > 0:
-            set_clause["per"] = float(per_val)
+        # 시가총액 기반 계산은 데이터가 있을 때만
+        if has_cap_data:
+            target_dt = pd.Timestamp(date_str)
+            valid_dates = cap_df.index[cap_df.index <= target_dt]
+            if len(valid_dates) > 0:
+                market_cap_val = cap_df.loc[valid_dates[-1], "market_cap"]
+                if pd.notna(market_cap_val) and float(market_cap_val) > 0:
+                    market_cap = float(market_cap_val)
 
-        pbr_val = row.get("PBR")
-        if pd.notna(pbr_val) and float(pbr_val) > 0:
-            set_clause["pbr"] = float(pbr_val)
+                    # PER: Q4에서만 당해연도 실적 기준 계산 (음수 순이익이면 음수 PER)
+                    if quarter == 4 and net_income is not None and net_income != 0:
+                        set_clause["per"] = market_cap / net_income
+
+                    # PBR: 모든 기간에서 시가총액 / total_equity
+                    if total_equity is not None and total_equity > 0:
+                        set_clause["pbr"] = market_cap / total_equity
 
         if set_clause:
             updates[(year, quarter)] = set_clause
+
+    # Q1-Q3의 PER는 pykrx fundamentals trailing PER로 보완 (단일 API 호출)
+    quarterly_periods = [(y, q) for y, q in period_dates if q != 4]
+    if quarterly_periods:
+        fund_df = stock_client.get_fundamentals_range(stock_code, min_date, max_date)
+        if fund_df is not None and not fund_df.empty:
+            for (year, quarter) in quarterly_periods:
+                target_dt = pd.Timestamp(period_dates[(year, quarter)])
+                valid_dates = fund_df.index[fund_df.index <= target_dt]
+                if len(valid_dates) == 0:
+                    continue
+
+                per_val = fund_df.loc[valid_dates[-1]].get("PER")
+                if pd.notna(per_val) and float(per_val) != 0:
+                    updates.setdefault((year, quarter), {})["per"] = float(per_val)
 
     # DB 업데이트
     async with async_session_factory() as session:
