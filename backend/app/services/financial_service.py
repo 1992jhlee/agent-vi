@@ -8,10 +8,12 @@ import logging
 from datetime import datetime
 from typing import Set, Tuple
 
-from sqlalchemy import select
+import pandas as pd
+from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.data_sources.dart_client import DARTClient
+from app.data_sources.stock_client import StockClient
 from app.db.models import FinancialStatement
 from app.db.session import async_session_factory
 
@@ -141,17 +143,13 @@ async def collect_financial_data(
                 failed += 1
                 continue
 
-            # 메타데이터 분리
-            metadata = data.pop("_metadata", {})
-
             # DB 저장
             await save_financial_statement(
                 company_id=company_id,
                 fiscal_year=year,
                 fiscal_quarter=quarter,
                 report_type="annual" if quarter == 4 else "quarterly",
-                data=data,
-                metadata=metadata
+                data=data
             )
 
             collected += 1
@@ -173,6 +171,12 @@ async def collect_financial_data(
         f"재무데이터 수집 완료: {stock_code} "
         f"(수집: {collected}, 스킵: {skipped}, 실패: {failed})"
     )
+
+    # PER/PBR 수집 (pykrx)
+    try:
+        await update_per_pbr(company_id, stock_code)
+    except Exception as e:
+        logger.error(f"PER/PBR 수집 실패: {stock_code} - {e}", exc_info=True)
 
     return {
         "success": True,
@@ -213,9 +217,13 @@ async def save_financial_statement(
             total_assets=data.get("total_assets"),
             total_liabilities=data.get("total_liabilities"),
             total_equity=data.get("total_equity"),
+            current_assets=data.get("current_assets"),
+            current_liabilities=data.get("current_liabilities"),
+            inventories=data.get("inventories"),
             operating_cash_flow=data.get("operating_cash_flow"),
             investing_cash_flow=data.get("investing_cash_flow"),
             financing_cash_flow=data.get("financing_cash_flow"),
+            capex=data.get("capex"),
             dividends_paid=None,  # 현재 파싱 안 됨
             shares_outstanding=None,  # 현재 파싱 안 됨
             raw_data_json=metadata or {}  # 메타데이터 저장
@@ -231,11 +239,92 @@ async def save_financial_statement(
                 "total_assets": stmt.excluded.total_assets,
                 "total_liabilities": stmt.excluded.total_liabilities,
                 "total_equity": stmt.excluded.total_equity,
+                "current_assets": stmt.excluded.current_assets,
+                "current_liabilities": stmt.excluded.current_liabilities,
+                "inventories": stmt.excluded.inventories,
                 "operating_cash_flow": stmt.excluded.operating_cash_flow,
                 "investing_cash_flow": stmt.excluded.investing_cash_flow,
                 "financing_cash_flow": stmt.excluded.financing_cash_flow,
+                "capex": stmt.excluded.capex,
+                "raw_data_json": stmt.excluded.raw_data_json,
             }
         )
 
         await session.execute(stmt)
         await session.commit()
+
+
+# 분기별 종료일 (월, 일)
+_QUARTER_END = {1: (3, 31), 2: (6, 30), 3: (9, 30), 4: (12, 31)}
+
+
+async def update_per_pbr(company_id: int, stock_code: str):
+    """
+    DB의 재무데이터에 대해 pykrx에서 PER/PBR를 수집하여 업데이트합니다.
+    각 분기의 종료일 기준 가장 가까운 거래일의 PER/PBR를 사용합니다.
+    """
+    # DB에서 기존 재무데이터의 (year, quarter) 목록 조회
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(FinancialStatement.fiscal_year, FinancialStatement.fiscal_quarter)
+            .where(FinancialStatement.company_id == company_id)
+        )
+        periods = result.all()
+
+    if not periods:
+        return
+
+    # 분기별 종료일 계산
+    period_dates: dict[tuple[int, int], str] = {}
+    for year, quarter in periods:
+        month, day = _QUARTER_END[quarter]
+        period_dates[(year, quarter)] = f"{year}{month:02d}{day:02d}"
+
+    min_date = min(period_dates.values())
+    max_date = max(period_dates.values())
+
+    # pykrx에서 전체 범위의 펀더멘털 데이터 조회 (단일 API 호출)
+    stock_client = StockClient()
+    fund_df = stock_client.get_fundamentals_range(stock_code, min_date, max_date)
+
+    if fund_df is None or fund_df.empty:
+        logger.warning(f"PER/PBR 수집 실패: {stock_code} - 펀더멘털 데이터 없음")
+        return
+
+    # 각 기간의 종료일 이하 가장 가까운 거래일의 PER/PBR 추출
+    updates: dict[tuple[int, int], dict] = {}
+    for (year, quarter), date_str in period_dates.items():
+        target_dt = pd.Timestamp(date_str)
+        valid_dates = fund_df.index[fund_df.index <= target_dt]
+        if len(valid_dates) == 0:
+            continue
+
+        row = fund_df.loc[valid_dates[-1]]
+        set_clause = {}
+
+        per_val = row.get("PER")
+        if pd.notna(per_val) and float(per_val) > 0:
+            set_clause["per"] = float(per_val)
+
+        pbr_val = row.get("PBR")
+        if pd.notna(pbr_val) and float(pbr_val) > 0:
+            set_clause["pbr"] = float(pbr_val)
+
+        if set_clause:
+            updates[(year, quarter)] = set_clause
+
+    # DB 업데이트
+    async with async_session_factory() as session:
+        for (year, quarter), set_clause in updates.items():
+            await session.execute(
+                update(FinancialStatement)
+                .where(
+                    FinancialStatement.company_id == company_id,
+                    FinancialStatement.fiscal_year == year,
+                    FinancialStatement.fiscal_quarter == quarter,
+                )
+                .values(**set_clause)
+            )
+        await session.commit()
+
+    logger.info(f"PER/PBR 업데이트 완료: {stock_code} ({len(updates)}건)")

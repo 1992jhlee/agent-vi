@@ -15,6 +15,41 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 
+# DART 표준 account_id (XBRL 태그) 매핑
+# account_id는 회사·분기 구분 없이 동일한 항목에 동일한 코드를 사용하므로
+# account_nm(회사별 자유형식 텍스트) 키워드 매칭보다 정확합니다.
+# sj_div는 재무제표 종류 코드: BS(재무상태표), IS/CIS(손익계산서), CF(현금흐름표)
+_ACCOUNT_MAP: dict[str, tuple[str, set[str]]] = {
+    # 손익계산서 (IS: 단일, CIS: 포괄)
+    "revenue":           ("ifrs-full_Revenue",          {"IS", "CIS"}),
+    "operating_income":  ("dart_OperatingIncomeLoss",   {"IS", "CIS"}),
+    "net_income":        ("ifrs-full_ProfitLoss",       {"IS", "CIS"}),
+    # 재무상태표
+    "total_assets":         ("ifrs-full_Assets",              {"BS"}),
+    "total_liabilities":    ("ifrs-full_Liabilities",         {"BS"}),
+    "total_equity":         ("ifrs-full_Equity",              {"BS"}),
+    "current_assets":       ("ifrs-full_CurrentAssets",       {"BS"}),
+    "current_liabilities":  ("ifrs-full_CurrentLiabilities",  {"BS"}),
+    "inventories":          ("ifrs-full_Inventories",         {"BS"}),
+    # 현금흐름표
+    "operating_cash_flow":  ("ifrs-full_CashFlowsFromUsedInOperatingActivities",  {"CF"}),
+    "investing_cash_flow":  ("ifrs-full_CashFlowsFromUsedInInvestingActivities",  {"CF"}),
+    "financing_cash_flow":  ("ifrs-full_CashFlowsFromUsedInFinancingActivities",  {"CF"}),
+    "capex":                ("ifrs-full_PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities", {"CF"}),
+}
+
+# capex를 단일 태그로 신고하지 않는 회사의 경우, 세부 유형자산 취득 태그를 합산하여 사용
+_CAPEX_DETAIL_TAGS = [
+    "dart_PurchaseOfLand",
+    "dart_PurchaseOfMachinery",
+    "dart_PurchaseOfStructure",
+    "dart_PurchaseOfVehicles",
+    "dart_PurchaseOfOtherPropertyPlantAndEquipment",
+    "dart_PurchaseOfConstructionInProgress",
+    "dart_PurchaseOfBuildings",
+]
+
+
 class DARTClient:
     """DART OpenAPI 클라이언트 래퍼"""
 
@@ -224,169 +259,51 @@ class DARTClient:
         """
         재무제표 DataFrame을 구조화된 딕셔너리로 변환
 
-        컨텍스트 기반 스마트 파싱:
-        - 손익계산서 구조를 분석하여 최상단 항목을 우선 선택
-        - 명시적인 계정과목명이 있으면 우선 사용
-        - 없으면 금액과 위치를 고려하여 판단
+        DART의 표준 account_id (XBRL 태그)와 sj_div 코드를 사용하여
+        회사·분기마다 다른 계정과목명(account_nm) 없이 정확하게 항목을 식별합니다.
 
         Args:
             df: get_financial_statements()에서 반환된 DataFrame
 
         Returns:
-            파싱된 재무 데이터 및 메타데이터
-            {
-                "revenue": 금액,
-                "_metadata": {
-                    "revenue_estimated": bool,
-                    "revenue_source": "실제 계정과목명"
-                }
-            }
+            파싱된 재무 데이터 딕셔너리
         """
         if df is None or df.empty:
             return {}
 
         result = {}
-        metadata = {}
 
         try:
-            # 재무제표 유형별로 분리
-            income_stmt = df[df["sj_nm"] == "손익계산서"]
-            balance_sheet = df[df["sj_nm"] == "재무상태표"]
-            cash_flow = df[df["sj_nm"] == "현금흐름표"]
+            for field, (account_id, allowed_divs) in _ACCOUNT_MAP.items():
+                mask = (df["account_id"] == account_id) & (df["sj_div"].isin(allowed_divs))
+                rows = df[mask]
+                if not rows.empty:
+                    value = self._extract_value(rows.iloc[0].get("thstrm_amount", 0))
+                    if value is not None:
+                        result[field] = value
 
-            # 1. 매출액: 손익계산서 최상단의 수익 항목
-            revenue_info = self._parse_revenue(income_stmt)
-            if revenue_info:
-                result["revenue"] = revenue_info["value"]
-                metadata["revenue_estimated"] = revenue_info.get("estimated", False)
-                metadata["revenue_source"] = revenue_info.get("source", "")
+            # capex fallback: 단일 태그 미사용 시 세부 유형자산 취득 항목 합산
+            if "capex" not in result:
+                capex_sum = 0
+                capex_found = False
+                for tag in _CAPEX_DETAIL_TAGS:
+                    mask = (df["account_id"] == tag) & (df["sj_div"] == "CF")
+                    rows = df[mask]
+                    if not rows.empty:
+                        val = self._extract_value(rows.iloc[0].get("thstrm_amount", 0))
+                        if val is not None:
+                            capex_sum += val
+                            capex_found = True
+                if capex_found:
+                    result["capex"] = capex_sum
+                    logger.debug(f"capex fallback 합산: {capex_sum}")
 
-            # 2. 영업이익
-            operating_income = self._find_account(income_stmt, ["영업이익"])
-            if operating_income:
-                result["operating_income"] = operating_income
-
-            # 3. 순이익 (보고서 유형에 따라 다름)
-            net_income = self._find_account(
-                income_stmt,
-                ["당기순이익", "반기순이익", "분기순이익", "순이익"]
-            )
-            if net_income:
-                result["net_income"] = net_income
-
-            # 4. 재무상태표 항목들
-            total_assets = self._find_account(balance_sheet, ["자산총계"])
-            if total_assets:
-                result["total_assets"] = total_assets
-
-            total_liabilities = self._find_account(balance_sheet, ["부채총계"])
-            if total_liabilities:
-                result["total_liabilities"] = total_liabilities
-
-            total_equity = self._find_account(balance_sheet, ["자본총계"])
-            if total_equity:
-                result["total_equity"] = total_equity
-
-            # 5. 현금흐름표 항목들
-            operating_cf = self._find_account(
-                cash_flow,
-                ["영업활동현금흐름", "영업활동으로 인한 현금흐름"]
-            )
-            if operating_cf:
-                result["operating_cash_flow"] = operating_cf
-
-            investing_cf = self._find_account(
-                cash_flow,
-                ["투자활동현금흐름", "투자활동으로 인한 현금흐름"]
-            )
-            if investing_cf:
-                result["investing_cash_flow"] = investing_cf
-
-            financing_cf = self._find_account(
-                cash_flow,
-                ["재무활동현금흐름", "재무활동으로 인한 현금흐름"]
-            )
-            if financing_cf:
-                result["financing_cash_flow"] = financing_cf
-
-            # 메타데이터 추가
-            if metadata:
-                result["_metadata"] = metadata
-
-            logger.debug(f"재무 데이터 파싱 완료: {len(result)} 항목 (추정: {sum(1 for k, v in metadata.items() if k.endswith('_estimated') and v)})")
+            logger.debug(f"재무 데이터 파싱 완료: {len(result)} 항목")
 
         except Exception as e:
             logger.error(f"재무 데이터 파싱 오류: {e}", exc_info=True)
 
         return result
-
-    def _parse_revenue(self, income_stmt: pd.DataFrame) -> dict[str, Any] | None:
-        """
-        매출액을 스마트하게 파싱
-
-        1. "매출액"이 명시적으로 있으면 사용
-        2. 없으면 손익계산서 최상단의 매출/수익 관련 항목 중 가장 큰 금액
-
-        Returns:
-            {
-                "value": 금액,
-                "estimated": 추정 여부 (True/False),
-                "source": 실제 계정과목명
-            }
-        """
-        if income_stmt.empty:
-            return None
-
-        # 1. 명시적인 "매출액" 찾기
-        exact_match = self._find_account(income_stmt, ["매출액"])
-        if exact_match:
-            return {
-                "value": exact_match,
-                "estimated": False,
-                "source": "매출액"
-            }
-
-        # 2. 손익계산서 최상단의 수익 관련 항목 찾기
-        # "매출", "수익", "영업수익" 등이 포함된 항목들
-        revenue_keywords = ["매출", "수익"]
-        candidates = []
-
-        for keyword in revenue_keywords:
-            rows = income_stmt[
-                income_stmt["account_nm"].str.contains(keyword, case=False, na=False)
-            ]
-            for _, row in rows.iterrows():
-                value = self._extract_value(row.get("thstrm_amount", 0))
-                if value and value > 0:
-                    candidates.append({
-                        "name": row["account_nm"],
-                        "value": value,
-                        "index": row.name
-                    })
-
-        # 가장 큰 금액을 가진 항목 선택 (보통 최상단 수익 항목이 가장 큼)
-        if candidates:
-            max_candidate = max(candidates, key=lambda x: x["value"])
-            logger.info(f"⚠️  매출액 추정: '{max_candidate['name']}' 항목을 매출액으로 판단 (금액: {max_candidate['value']:,}원)")
-            return {
-                "value": max_candidate["value"],
-                "estimated": True,
-                "source": max_candidate["name"]
-            }
-
-        return None
-
-    def _find_account(self, df: pd.DataFrame, patterns: list[str]) -> int | None:
-        """
-        패턴 목록으로 계정과목 찾기 (우선순위 순서)
-        """
-        for pattern in patterns:
-            rows = df[df["account_nm"].str.contains(pattern, case=False, na=False)]
-            if not rows.empty:
-                value = self._extract_value(rows.iloc[0].get("thstrm_amount", 0))
-                if value and value != 0:
-                    return value
-        return None
 
     def _extract_value(self, value: Any) -> int | None:
         """

@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { getCompany, getFinancials } from "@/lib/api";
-import FinancialTable from "@/components/companies/FinancialTable";
+import FinancialTabView from "@/components/companies/FinancialTabView";
 import RefreshFinancialButton from "@/components/companies/RefreshFinancialButton";
 
 interface Props {
@@ -75,33 +75,8 @@ export default async function CompanyDetailPage({ params }: Props) {
           </div>
         )}
 
-        {/* 연간 실적 */}
-        <section className="mb-12">
-          <h2 className="text-2xl font-semibold mb-4">연간 실적 (최근 6년)</h2>
-          {annualData.length > 0 ? (
-            <FinancialTable type="annual" data={annualData} />
-          ) : (
-            <div className="p-8 bg-gray-50 border border-gray-200 rounded-lg text-center">
-              <p className="text-gray-500">
-                데이터 수집 중입니다. 잠시 후 새로고침해주세요.
-              </p>
-            </div>
-          )}
-        </section>
-
-        {/* 분기 실적 */}
-        <section>
-          <h2 className="text-2xl font-semibold mb-4">분기 실적 (최근 8분기)</h2>
-          {quarterlyData.length > 0 ? (
-            <FinancialTable type="quarterly" data={quarterlyData} />
-          ) : (
-            <div className="p-8 bg-gray-50 border border-gray-200 rounded-lg text-center">
-              <p className="text-gray-500">
-                데이터 수집 중입니다. 잠시 후 새로고침해주세요.
-              </p>
-            </div>
-          )}
-        </section>
+        {/* 재무 실적 (연간/분기 토글) */}
+        <FinancialTabView annualData={annualData} quarterlyData={quarterlyData} />
       </div>
     );
   } catch (e) {

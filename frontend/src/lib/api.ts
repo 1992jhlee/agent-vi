@@ -1,5 +1,16 @@
+import {
+  Company,
+  CompanyListResponse,
+  FinancialDataResponse,
+  ReportSummary,
+  ReportListResponse,
+  ReportDetail,
+  AnalysisRun,
+  StockSearchResult,
+} from "@/lib/types";
+
 const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  process.env.API_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 async function fetchAPI<T>(
   endpoint: string,
@@ -39,11 +50,11 @@ export async function getCompanies(params?: {
   if (params?.q) searchParams.set("q", params.q);
 
   const query = searchParams.toString();
-  return fetchAPI(`/companies${query ? `?${query}` : ""}`);
+  return fetchAPI<CompanyListResponse>(`/companies${query ? `?${query}` : ""}`);
 }
 
 export async function getCompany(stockCode: string) {
-  return fetchAPI(`/companies/${stockCode}`);
+  return fetchAPI<Company>(`/companies/${stockCode}`);
 }
 
 // Reports
@@ -60,19 +71,19 @@ export async function getReports(params?: {
   if (params?.verdict) searchParams.set("verdict", params.verdict);
 
   const query = searchParams.toString();
-  return fetchAPI(`/reports${query ? `?${query}` : ""}`);
+  return fetchAPI<ReportListResponse>(`/reports${query ? `?${query}` : ""}`);
 }
 
 export async function getLatestReports(limit: number = 10) {
-  return fetchAPI(`/reports/latest?limit=${limit}`);
+  return fetchAPI<ReportSummary[]>(`/reports/latest?limit=${limit}`);
 }
 
 export async function getReport(slug: string) {
-  return fetchAPI(`/reports/${slug}`);
+  return fetchAPI<ReportDetail>(`/reports/${slug}`);
 }
 
 export async function getCompanyReports(stockCode: string) {
-  return fetchAPI(`/reports/company/${stockCode}`);
+  return fetchAPI<ReportSummary[]>(`/reports/company/${stockCode}`);
 }
 
 // Analysis
@@ -95,13 +106,13 @@ export async function getAnalysisRuns(params?: {
   if (params?.limit) searchParams.set("limit", String(params.limit));
 
   const query = searchParams.toString();
-  return fetchAPI(`/analysis/runs${query ? `?${query}` : ""}`);
+  return fetchAPI<AnalysisRun[]>(`/analysis/runs${query ? `?${query}` : ""}`);
 }
 
 // Financials
 export async function getFinancials(stockCode: string, years?: number) {
   const query = years ? `?years=${years}` : "";
-  return fetchAPI(`/financials/${stockCode}${query}`);
+  return fetchAPI<FinancialDataResponse>(`/financials/${stockCode}${query}`);
 }
 
 export async function getValuationMetrics(stockCode: string) {
@@ -117,5 +128,5 @@ export async function refreshFinancials(stockCode: string, force: boolean = fals
 
 // Stocks
 export async function searchStocks(query: string) {
-  return fetchAPI(`/stocks/search?q=${encodeURIComponent(query)}`);
+  return fetchAPI<StockSearchResult[]>(`/stocks/search?q=${encodeURIComponent(query)}`);
 }

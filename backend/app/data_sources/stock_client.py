@@ -175,6 +175,46 @@ class StockClient:
             logger.error(f"최근 주가 조회 실패: {e}", exc_info=True)
             return None
 
+    def get_fundamentals_range(
+        self,
+        stock_code: str,
+        start_date: str,
+        end_date: str
+    ) -> pd.DataFrame | None:
+        """
+        날짜 범위의 펀더멘털 지표 (PER, PBR 등) 조회
+
+        Args:
+            stock_code: 종목코드
+            start_date: 시작일 (YYYYMMDD 또는 YYYY-MM-DD)
+            end_date: 종료일 (YYYYMMDD 또는 YYYY-MM-DD)
+
+        Returns:
+            펀더멘털 DataFrame (인덱스: 날짜, 컬럼: PER, PBR, EPS, BPS, DIV)
+        """
+        try:
+            start = start_date.replace("-", "")
+            end = end_date.replace("-", "")
+
+            logger.info(f"펀더멘털 범위 조회: stock_code={stock_code}, period={start}~{end}")
+
+            df = stock.get_market_fundamental_by_date(
+                fromdate=start,
+                todate=end,
+                ticker=stock_code
+            )
+
+            if df is None or df.empty:
+                logger.warning(f"펀더멘털 데이터가 없습니다: {stock_code}")
+                return None
+
+            logger.info(f"펀더멘털 범위 조회 성공: {len(df)} 일")
+            return df
+
+        except Exception as e:
+            logger.error(f"펀더멘털 범위 조회 실패: {e}", exc_info=True)
+            return None
+
     def get_fundamental_data(self, stock_code: str, date: str) -> dict[str, Any] | None:
         """
         특정일의 PER, PBR, 배당수익률 등 기본적 분석 지표 조회

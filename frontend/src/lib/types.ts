@@ -81,6 +81,37 @@ export interface AnalysisRun {
   updated_at: string;
 }
 
+// Financial types
+export interface FinancialStatement {
+  fiscal_year: number;
+  fiscal_quarter: number;
+  report_type: string;
+  revenue: number | null;
+  operating_income: number | null;
+  net_income: number | null;
+  total_assets: number | null;
+  total_liabilities: number | null;
+  total_equity: number | null;
+  current_assets: number | null;
+  current_liabilities: number | null;
+  inventories: number | null;
+  operating_cash_flow: number | null;
+  investing_cash_flow: number | null;
+  financing_cash_flow: number | null;
+  capex: number | null;
+  per: number | null;
+  pbr: number | null;
+  dividends_paid: number | null;
+  shares_outstanding: number | null;
+  metadata: Record<string, unknown>;
+}
+
+export interface FinancialDataResponse {
+  stock_code: string;
+  company_name: string;
+  statements: FinancialStatement[];
+}
+
 // Verdict display helper
 export const VERDICT_LABELS: Record<string, string> = {
   strong_buy: "강력매수",

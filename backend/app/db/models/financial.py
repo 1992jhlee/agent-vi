@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, UniqueConstraint, func
+from sqlalchemy import BigInteger, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -28,11 +28,19 @@ class FinancialStatement(Base):
     total_assets: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     total_liabilities: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     total_equity: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    current_assets: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    current_liabilities: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    inventories: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
     # Cash Flow
     operating_cash_flow: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     investing_cash_flow: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     financing_cash_flow: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    capex: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+    # Investment Metrics (from pykrx)
+    per: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pbr: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     # Other
     dividends_paid: Mapped[int | None] = mapped_column(BigInteger, nullable=True)

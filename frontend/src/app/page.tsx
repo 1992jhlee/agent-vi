@@ -2,6 +2,8 @@ import Link from "next/link";
 import { getLatestReports } from "@/lib/api";
 import { ReportSummary, VERDICT_LABELS, VERDICT_COLORS } from "@/lib/types";
 
+export const dynamic = "force-dynamic";
+
 function getScoreColor(score: number | null): string {
   if (score === null) return "text-gray-400";
   if (score >= 80) return "text-red-600";
