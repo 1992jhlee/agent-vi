@@ -2,6 +2,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth import get_current_user
 from app.db.models import Company, FinancialStatement, ValuationMetric
 from app.db.session import get_db
 from app.services.financial_service import collect_financial_data
@@ -117,6 +118,7 @@ async def get_valuation_metrics(
 async def refresh_financial_data(
     stock_code: str,
     force: bool = Query(False, description="기존 데이터 덮어쓰기 여부"),
+    current_user: str = Depends(get_current_user),
     background_tasks: BackgroundTasks = BackgroundTasks(),
     db: AsyncSession = Depends(get_db),
 ):

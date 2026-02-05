@@ -5,6 +5,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth import get_current_user
 from app.data_sources.dart_client import DARTClient
 from app.db.models import Company
 from app.db.session import get_db
@@ -61,6 +62,7 @@ async def list_companies(
 async def create_company(
     data: CompanyCreate,
     background_tasks: BackgroundTasks,
+    current_user: str = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     # Check duplicate
@@ -120,6 +122,7 @@ async def get_company(
 async def update_company(
     stock_code: str,
     data: CompanyUpdate,
+    current_user: str = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(select(Company).where(Company.stock_code == stock_code))
@@ -139,6 +142,7 @@ async def update_company(
 @router.delete("/{stock_code}")
 async def delete_company(
     stock_code: str,
+    current_user: str = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(select(Company).where(Company.stock_code == stock_code))

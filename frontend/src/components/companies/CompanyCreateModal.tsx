@@ -1,14 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-
-interface StockSearchResult {
-  stock_code: string;
-  company_name: string;
-  market: string;
-}
+import { searchStocks, createCompany } from "@/lib/api";
+import type { StockSearchResult } from "@/lib/types";
 
 interface Props {
   isOpen: boolean;
@@ -35,11 +29,8 @@ export default function CompanyCreateModal({ isOpen, onClose, onSuccess }: Props
     setSearching(true);
     const timer = setTimeout(async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/v1/stocks/search?q=${encodeURIComponent(query)}`);
-        if (res.ok) {
-          const data = await res.json();
-          setSuggestions(data);
-        }
+        const data = await searchStocks(query);
+        setSuggestions(data);
       } catch (e) {
         console.error("검색 실패:", e);
       } finally {
@@ -61,27 +52,17 @@ export default function CompanyCreateModal({ isOpen, onClose, onSuccess }: Props
     setError(null);
 
     try {
-      const res = await fetch(`${API_BASE}/api/v1/companies`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          stock_code: selected.stock_code,
-          company_name: selected.company_name,
-          market: selected.market,
-        }),
+      await createCompany({
+        stock_code: selected.stock_code,
+        company_name: selected.company_name,
+        market: selected.market,
       });
-
-      if (res.ok) {
-        onSuccess();
-        onClose();
-        setQuery("");
-        setSelected(null);
-      } else {
-        const data = await res.json();
-        setError(data.detail || "등록 실패");
-      }
+      onSuccess();
+      onClose();
+      setQuery("");
+      setSelected(null);
     } catch (e) {
-      setError("네트워크 오류");
+      setError(e instanceof Error ? e.message : "등록 실패");
     } finally {
       setLoading(false);
     }

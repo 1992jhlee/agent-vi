@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     frontend_url: str = "http://localhost:3000"
     revalidation_secret: str = "change-me"
 
+    # Auth (Google OAuth / JWT)
+    auth_secret: str = ""
+
     # Backend
     backend_host: str = "0.0.0.0"
     backend_port: int = 8000

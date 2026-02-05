@@ -6,6 +6,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth import get_current_user
 from app.db.models import AnalysisRun, Company
 from app.db.session import get_db
 from app.schemas import AnalysisBatchCreate, AnalysisRunCreate, AnalysisRunResponse
@@ -31,6 +32,7 @@ def _run_pipeline_in_thread(run_id: int, company_id: int, stock_code: str, compa
 async def trigger_analysis(
     data: AnalysisRunCreate,
     background_tasks: BackgroundTasks,
+    current_user: str = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """단일 종목 분석을 시작합니다."""
@@ -93,6 +95,7 @@ async def get_analysis_run(
 @router.post("/batch", response_model=list[AnalysisRunResponse], status_code=201)
 async def trigger_batch_analysis(
     data: AnalysisBatchCreate,
+    current_user: str = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """여러 종목을 동시에 분석합니다."""

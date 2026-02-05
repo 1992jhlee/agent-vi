@@ -2,8 +2,13 @@
 
 import Link from "next/link";
 import { useState, useEffect } from "react";
+import {
+  triggerAnalysis,
+  getAnalysisRuns,
+  getAnalysisStatus,
+} from "@/lib/api";
 
-interface AnalysisRun {
+interface AnalysisRunStatus {
   id: number;
   company_name: string | null;
   stock_code: string | null;
@@ -18,9 +23,6 @@ interface AnalysisRun {
     overall_verdict: string;
   } | null;
 }
-
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 function StatusBadge({ status }: { status: string }) {
   const colors: Record<string, string> = {
@@ -48,45 +50,29 @@ export default function AdminPage() {
     type: "success" | "error";
     text: string;
   } | null>(null);
-  const [runs, setRuns] = useState<AnalysisRun[]>([]);
+  const [runs, setRuns] = useState<AnalysisRunStatus[]>([]);
   const [pollingIds, setPollingIds] = useState<number[]>([]);
 
   // 분석 실행 목록 조회
   const fetchRuns = async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/api/v1/analysis/runs?limit=10`);
-      if (res.ok) {
-        const data = await res.json();
-        // Get detailed status for each run
-        const detailedRuns = await Promise.all(
-          data.map(async (run: { id: number }) => {
-            const statusRes = await fetch(
-              `${API_BASE_URL}/api/v1/analysis/status/${run.id}`
-            );
-            if (statusRes.ok) {
-              return statusRes.json();
-            }
-            return run;
-          })
-        );
-        setRuns(detailedRuns);
+      const data = await getAnalysisRuns({ limit: 10 });
+      const detailedRuns = await Promise.all(
+        data.map((run) => getAnalysisStatus(run.id))
+      );
+      setRuns(detailedRuns);
 
-        // Update polling IDs for running tasks
-        const runningIds = detailedRuns
-          .filter(
-            (r: AnalysisRun) =>
-              r.status === "pending" || r.status === "running"
-          )
-          .map((r: AnalysisRun) => r.id);
-        setPollingIds(runningIds);
-      }
+      const runningIds = detailedRuns
+        .filter((r) => r.status === "pending" || r.status === "running")
+        .map((r) => r.id);
+      setPollingIds(runningIds);
     } catch (e) {
       console.error("Failed to fetch runs:", e);
     }
   };
 
   // 분석 실행 시작
-  const triggerAnalysis = async (e: React.FormEvent) => {
+  const handleTriggerAnalysis = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!stockCode.trim()) return;
 
@@ -94,31 +80,17 @@ export default function AdminPage() {
     setMessage(null);
 
     try {
-      const res = await fetch(`${API_BASE_URL}/api/v1/analysis/run`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ stock_code: stockCode.trim() }),
+      const data = await triggerAnalysis({ stock_code: stockCode.trim() });
+      setMessage({
+        type: "success",
+        text: `분석이 시작되었습니다. (Run ID: ${(data as { id: number }).id})`,
       });
-
-      if (res.ok) {
-        const data = await res.json();
-        setMessage({
-          type: "success",
-          text: `분석이 시작되었습니다. (Run ID: ${data.id})`,
-        });
-        setStockCode("");
-        fetchRuns();
-      } else {
-        const error = await res.json();
-        setMessage({
-          type: "error",
-          text: error.detail || "분석 시작에 실패했습니다.",
-        });
-      }
+      setStockCode("");
+      fetchRuns();
     } catch (e) {
       setMessage({
         type: "error",
-        text: e instanceof Error ? e.message : "네트워크 오류가 발생했습니다.",
+        text: e instanceof Error ? e.message : "분석 시작에 실패했습니다.",
       });
     } finally {
       setLoading(false);
@@ -168,7 +140,7 @@ export default function AdminPage() {
       {/* Analysis Trigger */}
       <div className="rounded-lg border bg-white p-6 shadow-sm mb-8">
         <h2 className="mb-4 text-xl font-semibold">분석 실행</h2>
-        <form onSubmit={triggerAnalysis} className="flex gap-4 mb-4">
+        <form onSubmit={handleTriggerAnalysis} className="flex gap-4 mb-4">
           <input
             type="text"
             value={stockCode}

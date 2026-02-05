@@ -2,8 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+import { refreshFinancials } from "@/lib/api";
 
 interface Props {
   stockCode: string;
@@ -21,25 +20,13 @@ export default function RefreshFinancialButton({ stockCode }: Props) {
     setSuccess(false);
 
     try {
-      const res = await fetch(
-        `${API_BASE}/api/v1/financials/${stockCode}/refresh?force=false`,
-        {
-          method: "POST",
-        }
-      );
-
-      if (res.ok) {
-        setSuccess(true);
-        // 3초 후 새로고침
-        setTimeout(() => {
-          router.refresh();
-        }, 3000);
-      } else {
-        const data = await res.json();
-        setError(data.detail || "재무 데이터 갱신에 실패했습니다.");
-      }
+      await refreshFinancials(stockCode, false);
+      setSuccess(true);
+      setTimeout(() => {
+        router.refresh();
+      }, 3000);
     } catch (e) {
-      setError("네트워크 오류가 발생했습니다.");
+      setError(e instanceof Error ? e.message : "재무 데이터 갱신에 실패했습니다.");
     } finally {
       setLoading(false);
     }

@@ -12,17 +12,60 @@ import {
 const API_BASE_URL =
   process.env.API_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
-async function fetchAPI<T>(
-  endpoint: string,
-  options?: RequestInit
-): Promise<T> {
+// ---------------------------------------------------------------------------
+// Auth token cache — 서버 측 /api/auth/token에서 받은 JWT를 메모리에 캐시
+// ---------------------------------------------------------------------------
+let tokenCache: { token: string; expiresAt: number } | null = null;
+
+export async function getAuthToken(): Promise<string> {
+  const now = Date.now();
+  if (tokenCache && now < tokenCache.expiresAt) {
+    return tokenCache.token;
+  }
+
+  const res = await fetch("/api/auth/token");
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "토큰 가져오기 실패");
+  }
+
+  const { token } = await res.json();
+  tokenCache = {
+    token,
+    expiresAt: now + 55 * 60 * 1000, // 55분 (백엔드 JWT는 1h)
+  };
+  return token;
+}
+
+export function clearAuthToken(): void {
+  tokenCache = null;
+}
+
+// ---------------------------------------------------------------------------
+// Core fetch helper
+// ---------------------------------------------------------------------------
+interface FetchOptions extends RequestInit {
+  /** true이면 Bearer token을 자동으로 첨부 */
+  auth?: boolean;
+}
+
+async function fetchAPI<T>(endpoint: string, options?: FetchOptions): Promise<T> {
+  const { auth: needsAuth, ...restOptions } = options ?? {};
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(restOptions.headers as Record<string, string>),
+  };
+
+  if (needsAuth) {
+    const token = await getAuthToken();
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
   const url = `${API_BASE_URL}/api/v1${endpoint}`;
   const res = await fetch(url, {
-    headers: {
-      "Content-Type": "application/json",
-      ...options?.headers,
-    },
-    ...options,
+    ...restOptions,
+    headers,
   });
 
   if (!res.ok) {
@@ -55,6 +98,18 @@ export async function getCompanies(params?: {
 
 export async function getCompany(stockCode: string) {
   return fetchAPI<Company>(`/companies/${stockCode}`);
+}
+
+export async function createCompany(data: {
+  stock_code: string;
+  company_name: string;
+  market: string;
+}) {
+  return fetchAPI<Company>("/companies", {
+    method: "POST",
+    body: JSON.stringify(data),
+    auth: true,
+  });
 }
 
 // Reports
@@ -94,7 +149,26 @@ export async function triggerAnalysis(data: {
   return fetchAPI("/analysis/run", {
     method: "POST",
     body: JSON.stringify(data),
+    auth: true,
   });
+}
+
+export async function getAnalysisStatus(runId: number) {
+  return fetchAPI<{
+    id: number;
+    company_name: string | null;
+    stock_code: string | null;
+    status: string;
+    started_at: string | null;
+    completed_at: string | null;
+    error_message: string | null;
+    report: {
+      id: number;
+      slug: string;
+      overall_score: number;
+      overall_verdict: string;
+    } | null;
+  }>(`/analysis/status/${runId}`);
 }
 
 export async function getAnalysisRuns(params?: {
@@ -123,6 +197,7 @@ export async function refreshFinancials(stockCode: string, force: boolean = fals
   const query = force ? "?force=true" : "";
   return fetchAPI(`/financials/${stockCode}/refresh${query}`, {
     method: "POST",
+    auth: true,
   });
 }
 
