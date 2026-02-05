@@ -29,3 +29,4 @@ class Company(Base):
     news_articles = relationship("NewsArticle", back_populates="company")
     valuation_metrics = relationship("ValuationMetric", back_populates="company")
     reports = relationship("AnalysisReport", back_populates="company")
+    watchlists = relationship("Watchlist", back_populates="company", passive_deletes=True)

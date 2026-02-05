@@ -8,8 +8,11 @@ from datetime import datetime, timedelta
 from typing import List
 
 from fastapi import APIRouter, Query
-from pykrx import stock
 from pydantic import BaseModel
+from pykrx import stock
+
+# stock_client 임포트는 pykrx Post.read 세션 패치를 적용합니다 (KRX WAF 우회).
+import app.data_sources.stock_client  # noqa: F401, E402
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +30,25 @@ class StockInfo(BaseModel):
 _stock_cache: List[StockInfo] = []
 _cache_updated_at: datetime | None = None
 _CACHE_TTL = timedelta(hours=24)  # 24시간 캐시
+
+
+def _load_stocks_from_dart() -> List[StockInfo]:
+    """DART corp_codes에서 상장종목만 로드 (pykrx 실패 시 백업)."""
+    try:
+        from app.data_sources.dart_client import DARTClient
+
+        dart = DARTClient()
+        corp_list = dart.client.corp_codes
+        # stock_code가 비어있지 않은 행만 (상장사)
+        listed = corp_list[corp_list["stock_code"].str.strip() != ""].copy()
+        listed = listed.drop_duplicates(subset=["stock_code"], keep="last")
+        return [
+            StockInfo(stock_code=row["stock_code"], company_name=row["corp_name"], market="")
+            for _, row in listed.iterrows()
+        ]
+    except Exception as e:
+        logger.error(f"DART 백업 로드 실패: {e}", exc_info=True)
+        return []
 
 
 def _load_all_stocks() -> List[StockInfo]:
@@ -78,12 +100,17 @@ def _load_all_stocks() -> List[StockInfo]:
         logger.info(f"종목 리스트 로드 완료: KOSPI={len(kospi_tickers)}, KOSDAQ={len(kosdaq_tickers)}, 총={len(stocks)}개")
 
     except Exception as e:
-        logger.error(f"종목 리스트 로드 실패: {e}", exc_info=True)
-        # 실패해도 기존 캐시 반환
+        logger.error(f"pykrx 종목 리스트 로드 실패: {e}", exc_info=True)
         if _stock_cache:
             logger.info("기존 캐시 사용")
             return _stock_cache
-        raise
+        logger.warning("pykrx 실패 — DART corp_codes로 백업 로드 시도")
+        stocks = _load_stocks_from_dart()
+        if stocks:
+            _stock_cache = stocks
+            _cache_updated_at = datetime.now()
+            logger.info(f"DART 백업 로드 완료: {len(stocks)}개")
+        return stocks
 
     return stocks
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { searchStocks, createCompany } from "@/lib/api";
+import { searchStocks, addToWatchlist } from "@/lib/api";
 import type { StockSearchResult } from "@/lib/types";
 
 interface Props {
@@ -52,7 +52,7 @@ export default function CompanyCreateModal({ isOpen, onClose, onSuccess }: Props
     setError(null);
 
     try {
-      await createCompany({
+      await addToWatchlist({
         stock_code: selected.stock_code,
         company_name: selected.company_name,
         market: selected.market,
@@ -73,7 +73,7 @@ export default function CompanyCreateModal({ isOpen, onClose, onSuccess }: Props
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-white rounded-lg p-6 w-full max-w-md">
-        <h2 className="text-xl font-semibold mb-4">종목 등록</h2>
+        <h2 className="text-xl font-semibold mb-4">관심종목 추가</h2>
 
         <form onSubmit={handleSubmit}>
           <div className="mb-4">
@@ -132,7 +132,7 @@ export default function CompanyCreateModal({ isOpen, onClose, onSuccess }: Props
                   >
                     <div className="font-medium">{item.company_name}</div>
                     <div className="text-sm text-gray-500">
-                      {item.stock_code} · {item.market}
+                      {item.stock_code}{item.market ? ` · ${item.market}` : ""}
                     </div>
                   </li>
                 ))}
@@ -165,13 +165,13 @@ export default function CompanyCreateModal({ isOpen, onClose, onSuccess }: Props
               disabled={!selected || loading}
               className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400"
             >
-              {loading ? "등록 중..." : "등록"}
+              {loading ? "추가 중..." : "추가"}
             </button>
           </div>
         </form>
 
         <p className="text-xs text-gray-500 mt-4">
-          등록 후 재무데이터가 자동으로 수집됩니다.
+          관심종목에 추가됩니다. 새 종목이면 재무데이터가 자동으로 수집됩니다.
         </p>
       </div>
     </div>

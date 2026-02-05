@@ -5,6 +5,7 @@ from app.db.models.news import NewsArticle
 from app.db.models.report import AnalysisReport
 from app.db.models.stock_price import StockPrice
 from app.db.models.valuation import ValuationMetric
+from app.db.models.watchlist import Watchlist
 
 __all__ = [
     "Company",
@@ -14,4 +15,5 @@ __all__ = [
     "NewsArticle",
     "ValuationMetric",
     "AnalysisReport",
+    "Watchlist",
 ]

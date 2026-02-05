@@ -8,9 +8,54 @@ from datetime import datetime, timedelta
 from typing import Any
 
 import pandas as pd
+import requests as _requests
 from pykrx import stock
+from pykrx.website.krx.krxio import Post as _KrxPost
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# KRX WAF 우회 패치
+# data.krx.co.kr은 www.krx.co.kr의 세션 쿠키(SCOUTER)가 없으면 403을 반환합니다.
+# pykrx의 Post 클래스는 세션 없이 raw requests.post()를 사용하므로,
+# Post.read를 monkey-patch하여 세션 기반 요청으로 바꾸면 정상 작동합니다.
+# ---------------------------------------------------------------------------
+_krx_session: _requests.Session | None = None
+
+
+def _init_krx_session() -> _requests.Session:
+    """www.krx.co.kr을 방문하여 SCOUTER 쿠키를 획득하고 세션을 (re)초기화한다."""
+    global _krx_session
+    _krx_session = _requests.Session()
+    _krx_session.headers.update({
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        ),
+    })
+    try:
+        _krx_session.get("https://www.krx.co.kr/", timeout=10)
+        logger.info("KRX 세션 초기화 완료 (SCOUTER cookie 획득)")
+    except Exception as e:
+        logger.warning(f"KRX 세션 초기화 실패: {e}")
+    return _krx_session
+
+
+def _krx_patched_read(self, **params):
+    """세션 기반 POST 요청 — KRX WAF 우회 및 403 시 자동 세션 갱신."""
+    global _krx_session
+    if _krx_session is None:
+        _init_krx_session()
+    resp = _krx_session.post(self.url, headers=self.headers, data=params)
+    if resp.status_code == 403:
+        logger.warning("KRX 403 응답 — 세션 갱신 후 재시도")
+        _init_krx_session()
+        resp = _krx_session.post(self.url, headers=self.headers, data=params)
+    return resp
+
+
+_KrxPost.read = _krx_patched_read
+# ---------------------------------------------------------------------------
 
 
 class StockClient:

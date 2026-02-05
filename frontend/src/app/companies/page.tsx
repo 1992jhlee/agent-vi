@@ -1,12 +1,14 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { getCompanies } from "@/lib/api";
+import { useSession, signIn } from "next-auth/react";
+import { getWatchlist, removeFromWatchlist } from "@/lib/api";
 import { CompanyListResponse } from "@/lib/types";
 import CompanyCreateModal from "@/components/companies/CompanyCreateModal";
 
 export default function CompaniesPage() {
+  const { data: session, status: sessionStatus } = useSession();
   const [data, setData] = useState<CompanyListResponse | null>(null);
   const [search, setSearch] = useState("");
   const [market, setMarket] = useState("");
@@ -14,10 +16,10 @@ export default function CompaniesPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  const fetchCompanies = async () => {
+  const fetchWatchlist = useCallback(async () => {
     setLoading(true);
     try {
-      const result = await getCompanies({
+      const result = await getWatchlist({
         page,
         per_page: 20,
         market: market || undefined,
@@ -25,21 +27,63 @@ export default function CompaniesPage() {
       });
       setData(result);
     } catch (e) {
-      console.error("Failed to fetch companies:", e);
+      console.error("Failed to fetch watchlist:", e);
     } finally {
       setLoading(false);
     }
-  };
+  }, [page, market, search]);
 
   useEffect(() => {
-    fetchCompanies();
-  }, [page, market]);
+    if (session) {
+      fetchWatchlist();
+    }
+  }, [session, fetchWatchlist]);
 
   const handleSearch = () => {
     setPage(1);
-    fetchCompanies();
+    fetchWatchlist();
   };
 
+  const handleRemove = async (stockCode: string) => {
+    try {
+      await removeFromWatchlist(stockCode);
+      fetchWatchlist();
+    } catch (e) {
+      console.error("Failed to remove from watchlist:", e);
+    }
+  };
+
+  // 세션 로딩 중
+  if (sessionStatus === "loading") {
+    return (
+      <div className="container mx-auto px-4 py-8">
+        <div className="text-center py-12">
+          <p className="text-gray-500">로딩 중...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // 미로그인
+  if (!session) {
+    return (
+      <div className="container mx-auto px-4 py-8">
+        <h1 className="text-3xl font-bold mb-8">관심 종목</h1>
+        <div className="p-12 bg-gray-50 border border-gray-200 rounded-lg text-center">
+          <p className="text-gray-600 text-lg mb-2">관심종목을 관리하려면 로그인이 필요합니다.</p>
+          <p className="text-gray-400 text-sm mb-6">로그인 후 관심종목을 추가하고 나만의 종목 리스트를 구성할 수 있습니다.</p>
+          <button
+            onClick={() => signIn("google")}
+            className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            Google 로그인
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // 로그인된 상태
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="flex justify-between items-center mb-6">
@@ -107,13 +151,20 @@ export default function CompaniesPage() {
                     <td className="px-4 py-3 font-medium">{company.company_name}</td>
                     <td className="px-4 py-3">{company.market}</td>
                     <td className="px-4 py-3">{company.sector || "-"}</td>
-                    <td className="px-4 py-3 text-right">
+                    <td className="px-4 py-3 text-right flex items-center justify-end gap-3">
                       <Link
                         href={`/companies/${company.stock_code}`}
                         className="text-blue-600 hover:text-blue-800"
                       >
                         상세 보기 →
                       </Link>
+                      <button
+                        onClick={() => handleRemove(company.stock_code)}
+                        className="text-gray-400 hover:text-red-500 transition-colors"
+                        title="관심종목 제거"
+                      >
+                        ×
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -142,7 +193,10 @@ export default function CompaniesPage() {
         </>
       ) : (
         <div className="p-8 bg-gray-50 border border-gray-200 rounded-lg text-center">
-          <p className="text-gray-500">등록된 종목이 없습니다.</p>
+          <p className="text-gray-500 mb-2">관심종목이 없습니다.</p>
+          <p className="text-gray-400 text-sm">
+            위의 &quot;+ 종목 등록&quot; 버튼으로 관심종목을 추가해보세요.
+          </p>
         </div>
       )}
 
@@ -152,7 +206,7 @@ export default function CompaniesPage() {
         onClose={() => setIsModalOpen(false)}
         onSuccess={() => {
           setIsModalOpen(false);
-          fetchCompanies();
+          fetchWatchlist();
         }}
       />
     </div>

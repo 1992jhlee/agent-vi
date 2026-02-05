@@ -53,7 +53,7 @@ async function fetchAPI<T>(endpoint: string, options?: FetchOptions): Promise<T>
   const { auth: needsAuth, ...restOptions } = options ?? {};
 
   const headers: Record<string, string> = {
-    "Content-Type": "application/json",
+    ...(restOptions.body ? { "Content-Type": "application/json" } : {}),
     ...(restOptions.headers as Record<string, string>),
   };
 
@@ -197,6 +197,44 @@ export async function refreshFinancials(stockCode: string, force: boolean = fals
   const query = force ? "?force=true" : "";
   return fetchAPI(`/financials/${stockCode}/refresh${query}`, {
     method: "POST",
+    auth: true,
+  });
+}
+
+// Watchlist
+export async function getWatchlist(params?: {
+  page?: number;
+  per_page?: number;
+  market?: string;
+  q?: string;
+}) {
+  const searchParams = new URLSearchParams();
+  if (params?.page) searchParams.set("page", String(params.page));
+  if (params?.per_page) searchParams.set("per_page", String(params.per_page));
+  if (params?.market) searchParams.set("market", params.market);
+  if (params?.q) searchParams.set("q", params.q);
+
+  const query = searchParams.toString();
+  return fetchAPI<CompanyListResponse>(`/watchlist${query ? `?${query}` : ""}`, {
+    auth: true,
+  });
+}
+
+export async function addToWatchlist(data: {
+  stock_code: string;
+  company_name: string;
+  market: string;
+}) {
+  return fetchAPI<Company>("/watchlist", {
+    method: "POST",
+    body: JSON.stringify(data),
+    auth: true,
+  });
+}
+
+export async function removeFromWatchlist(stockCode: string) {
+  return fetchAPI<void>(`/watchlist/${stockCode}`, {
+    method: "DELETE",
     auth: true,
   });
 }

@@ -38,8 +38,8 @@ export default function FinancialTable({ type, data }: Props) {
   };
 
   const calcQuickRatio = (col: FinancialStatement): number | null => {
-    if (col.current_assets === null || col.inventories === null || col.current_liabilities === null || col.current_liabilities === 0) return null;
-    return ((col.current_assets - col.inventories) / col.current_liabilities) * 100;
+    if (col.current_assets === null || col.current_liabilities === null || col.current_liabilities === 0) return null;
+    return ((col.current_assets - (col.inventories ?? 0)) / col.current_liabilities) * 100;
   };
 
   const calcFCF = (col: FinancialStatement): number | null => {
