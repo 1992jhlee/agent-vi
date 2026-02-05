@@ -277,10 +277,12 @@ class DARTClient:
             for field, (account_id, allowed_divs) in _ACCOUNT_MAP.items():
                 mask = (df["account_id"] == account_id) & (df["sj_div"].isin(allowed_divs))
                 rows = df[mask]
-                if not rows.empty:
-                    value = self._extract_value(rows.iloc[0].get("thstrm_amount", 0))
+                # OWN/CON 행이 혼재할 수 있으므로 첫 번째 유효 값을 사용
+                for _, row in rows.iterrows():
+                    value = self._extract_value(row.get("thstrm_amount", 0))
                     if value is not None:
                         result[field] = value
+                        break
 
             # capex fallback: 단일 태그 미사용 시 세부 유형자산 취득 항목 합산
             if "capex" not in result:
@@ -289,14 +291,36 @@ class DARTClient:
                 for tag in _CAPEX_DETAIL_TAGS:
                     mask = (df["account_id"] == tag) & (df["sj_div"] == "CF")
                     rows = df[mask]
-                    if not rows.empty:
-                        val = self._extract_value(rows.iloc[0].get("thstrm_amount", 0))
+                    for _, row in rows.iterrows():
+                        val = self._extract_value(row.get("thstrm_amount", 0))
                         if val is not None:
                             capex_sum += val
                             capex_found = True
+                            break
                 if capex_found:
                     result["capex"] = capex_sum
                     logger.debug(f"capex fallback 합산: {capex_sum}")
+
+            # capex fallback 2: 표준 계정코드 미사용 시 account_nm으로 직접 매칭
+            # 일부 회사·연도에서 XBRL 태그를 사용하지 않고 자유형식 계정과목명만 신고함
+            if "capex" not in result:
+                _capex_nm_variants = {"유형자산 취득", "유형자산의 취득"}
+                nm_mask = (
+                    (df["account_id"] == "-표준계정코드 미사용-")
+                    & (df["sj_div"] == "CF")
+                )
+                for _, row in df[nm_mask].iterrows():
+                    nm = str(row.get("account_nm", "")).strip()
+                    if nm in _capex_nm_variants:
+                        val = self._extract_value(row.get("thstrm_amount", 0))
+                        if val is not None:
+                            # 회사별 부호 표현이 다를 수 있으므로 절대값으로 표준화
+                            result["capex"] = abs(val)
+                            logger.debug(
+                                f"capex nm-fallback: nm='{nm}' "
+                                f"raw={val} → {abs(val)}"
+                            )
+                            break
 
             logger.debug(f"재무 데이터 파싱 완료: {len(result)} 항목")
 
