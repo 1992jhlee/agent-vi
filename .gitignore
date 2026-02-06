@@ -49,3 +49,8 @@ htmlcov/
 *.tar.gz
 *.whl
 backend/docs_cache/
+
+# Claude Code (keep reports/)
+.claude/agents/
+.claude/settings*.json
+.claude/memory/
