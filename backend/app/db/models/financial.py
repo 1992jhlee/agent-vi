@@ -10,7 +10,10 @@ from app.db.session import Base
 class FinancialStatement(Base):
     __tablename__ = "financial_statements"
     __table_args__ = (
-        UniqueConstraint("company_id", "fiscal_year", "fiscal_quarter", name="uq_financial_period"),
+        UniqueConstraint(
+            "company_id", "fiscal_year", "fiscal_quarter", "report_type",
+            name="uq_financial_period"
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

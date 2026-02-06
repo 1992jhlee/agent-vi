@@ -5,7 +5,7 @@ DART에서 재무제표를 수집하여 DB에 저장합니다.
 증분 업데이트 방식으로 이미 있는 데이터는 스킵합니다.
 """
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Set, Tuple
 
 import pandas as pd
@@ -143,6 +143,16 @@ async def collect_financial_data(
                 failed += 1
                 continue
 
+            # 현금흐름표는 DART가 누적으로 제공하므로 단독 실적으로 변환
+            # 손익계산서는 이미 단독, 재무상태표는 시점 기준이므로 변환 불필요
+            if quarter != 4:  # 분기 데이터만 (Q4는 연간이므로 나중에 처리)
+                data = await convert_cashflow_to_standalone(
+                    company_id=company_id,
+                    fiscal_year=year,
+                    fiscal_quarter=quarter,
+                    cumulative_data=data
+                )
+
             # DB 저장
             await save_financial_statement(
                 company_id=company_id,
@@ -164,6 +174,9 @@ async def collect_financial_data(
                 exc_info=True
             )
             failed += 1
+
+    # 4Q 단독 실적 생성 (연간 - 3Q)
+    await generate_q4_standalone_statements(company_id, stock_code)
 
     skipped = len(existing) if not force_update else 0
 
@@ -231,7 +244,7 @@ async def save_financial_statement(
 
         # Unique constraint 충돌 시 업데이트
         stmt = stmt.on_conflict_do_update(
-            index_elements=["company_id", "fiscal_year", "fiscal_quarter"],
+            index_elements=["company_id", "fiscal_year", "fiscal_quarter", "report_type"],
             set_={
                 "revenue": stmt.excluded.revenue,
                 "operating_income": stmt.excluded.operating_income,
@@ -296,10 +309,16 @@ async def update_per_pbr(company_id: int, stock_code: str):
     min_date = min(period_dates.values())
     max_date = max(period_dates.values())
 
+    # 휴장일 대응: min_date를 30일 앞당겨서 분기 종료일이 휴장일인 경우에도
+    # 이전 영업일의 시가총액 데이터를 포함할 수 있도록 함
+    # 예: 2019-12-31이 휴장일이면 pykrx는 2020-01-02부터 반환하여 2019-12-30 누락 방지
+    min_date_dt = datetime.strptime(min_date, "%Y%m%d")
+    min_date_adjusted = (min_date_dt - timedelta(days=30)).strftime("%Y%m%d")
+
     stock_client = StockClient()
 
     # 시가총액 범위 조회 (단일 API 호출) — PBR 및 Q4 PER 계산용
-    cap_df = stock_client.get_market_cap(stock_code, min_date, max_date)
+    cap_df = stock_client.get_market_cap(stock_code, min_date_adjusted, max_date)
     has_cap_data = cap_df is not None and not cap_df.empty
     if not has_cap_data:
         logger.warning(f"시가총액 데이터 없음: {stock_code} — Q4 음수 순이익 PER null 세팅만 수행")
@@ -334,7 +353,7 @@ async def update_per_pbr(company_id: int, stock_code: str):
     # Q1-Q3의 PER는 pykrx fundamentals trailing PER로 보완 (단일 API 호출)
     quarterly_periods = [(y, q) for y, q in period_dates if q != 4]
     if quarterly_periods:
-        fund_df = stock_client.get_fundamentals_range(stock_code, min_date, max_date)
+        fund_df = stock_client.get_fundamentals_range(stock_code, min_date_adjusted, max_date)
         if fund_df is not None and not fund_df.empty:
             for (year, quarter) in quarterly_periods:
                 target_dt = pd.Timestamp(period_dates[(year, quarter)])
@@ -361,3 +380,203 @@ async def update_per_pbr(company_id: int, stock_code: str):
         await session.commit()
 
     logger.info(f"PER/PBR 업데이트 완료: {stock_code} ({len(updates)}건)")
+
+
+async def convert_cashflow_to_standalone(
+    company_id: int,
+    fiscal_year: int,
+    fiscal_quarter: int,
+    cumulative_data: dict
+) -> dict:
+    """
+    현금흐름표 항목을 누적에서 단독 실적으로 변환합니다.
+
+    DART는 현금흐름표를 연초부터 누적으로 제공하므로:
+    - 1Q: 누적 = 단독 (변환 불필요)
+    - 2Q: 누적 - 1Q 누적 = 2Q 단독
+    - 3Q: 누적 - 2Q 누적 = 3Q 단독
+
+    손익계산서는 DART가 이미 단독으로 제공하므로 변환하지 않습니다.
+    재무상태표는 시점 기준이므로 변환 개념이 없습니다.
+
+    Args:
+        company_id: Company.id
+        fiscal_year: 회계연도
+        fiscal_quarter: 분기 (1, 2, 3)
+        cumulative_data: DART에서 파싱한 누적 데이터
+
+    Returns:
+        단독 실적으로 변환된 데이터
+    """
+    data = cumulative_data.copy()
+
+    # 1분기는 누적 = 단독이므로 변환 불필요
+    if fiscal_quarter == 1:
+        return data
+
+    # 이전 분기 데이터 조회
+    prev_quarter = fiscal_quarter - 1
+
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(FinancialStatement)
+            .where(
+                FinancialStatement.company_id == company_id,
+                FinancialStatement.fiscal_year == fiscal_year,
+                FinancialStatement.fiscal_quarter == prev_quarter
+            )
+        )
+        prev_statement = result.scalar_one_or_none()
+
+    if not prev_statement:
+        logger.warning(
+            f"이전 분기 데이터 없음: {fiscal_year}/{prev_quarter}Q - "
+            f"현금흐름 단독 변환 불가, 누적 값 사용"
+        )
+        return data
+
+    # 현금흐름표 항목만 단독으로 변환 (손익, 재무상태는 그대로)
+    cf_fields = ["operating_cash_flow", "investing_cash_flow", "financing_cash_flow", "capex"]
+
+    for field in cf_fields:
+        if field in data and data[field] is not None:
+            prev_value = getattr(prev_statement, field, None)
+            if prev_value is not None:
+                data[field] = data[field] - prev_value
+                logger.debug(
+                    f"{fiscal_year}/{fiscal_quarter}Q {field} 단독 변환: "
+                    f"누적 {cumulative_data[field]:,} - 이전분기 {prev_value:,} = {data[field]:,}"
+                )
+
+    return data
+
+
+async def generate_q4_standalone_statements(company_id: int, stock_code: str):
+    """
+    연간 데이터와 3Q 데이터를 이용하여 4Q 단독 실적을 생성합니다.
+
+    4분기는 별도 보고서가 없고 사업보고서(연간)만 있으므로:
+    - 4Q 단독 손익 = 연간 - 3Q 누적 (DART 손익은 이미 단독이므로 3Q까지 합산 필요)
+    - 4Q 단독 현금흐름 = 연간 - 3Q 누적
+    - 재무상태표는 연간 값 그대로 사용 (시점 기준)
+
+    Args:
+        company_id: Company.id
+        stock_code: 종목코드
+    """
+    async with async_session_factory() as session:
+        # 연간 데이터 조회 (report_type='annual')
+        result = await session.execute(
+            select(FinancialStatement)
+            .where(
+                FinancialStatement.company_id == company_id,
+                FinancialStatement.report_type == "annual"
+            )
+            .order_by(FinancialStatement.fiscal_year.desc())
+        )
+        annual_statements = result.scalars().all()
+
+        for annual in annual_statements:
+            year = annual.fiscal_year
+
+            # 동일 연도 3Q 데이터 조회
+            result_q3 = await session.execute(
+                select(FinancialStatement)
+                .where(
+                    FinancialStatement.company_id == company_id,
+                    FinancialStatement.fiscal_year == year,
+                    FinancialStatement.fiscal_quarter == 3,
+                    FinancialStatement.report_type == "quarterly"
+                )
+            )
+            q3_statement = result_q3.scalar_one_or_none()
+
+            if not q3_statement:
+                logger.warning(f"{year}년 3Q 데이터 없음 - 4Q 단독 생성 불가")
+                continue
+
+            # 동일 연도 1Q, 2Q 데이터도 조회 (손익 합산용)
+            result_q1_q2 = await session.execute(
+                select(FinancialStatement)
+                .where(
+                    FinancialStatement.company_id == company_id,
+                    FinancialStatement.fiscal_year == year,
+                    FinancialStatement.fiscal_quarter.in_([1, 2]),
+                    FinancialStatement.report_type == "quarterly"
+                )
+                .order_by(FinancialStatement.fiscal_quarter)
+            )
+            q1_q2_statements = result_q1_q2.scalars().all()
+
+            # 손익계산서는 DART가 단독으로 제공하므로 1Q+2Q+3Q 합산
+            q1_q2_q3_sum = {}
+            income_fields = ["revenue", "operating_income", "net_income"]
+
+            for field in income_fields:
+                total = 0
+                for stmt in [*q1_q2_statements, q3_statement]:
+                    value = getattr(stmt, field, None)
+                    if value is not None:
+                        total += value
+                q1_q2_q3_sum[field] = total
+
+            # 4Q 단독 데이터 계산
+            q4_data = {
+                # 손익: 연간 - (1Q+2Q+3Q)
+                "revenue": (
+                    (annual.revenue - q1_q2_q3_sum["revenue"])
+                    if annual.revenue else None
+                ),
+                "operating_income": (
+                    (annual.operating_income - q1_q2_q3_sum["operating_income"])
+                    if annual.operating_income else None
+                ),
+                "net_income": (
+                    (annual.net_income - q1_q2_q3_sum["net_income"])
+                    if annual.net_income else None
+                ),
+
+                # 재무상태표: 연간 값 그대로 (시점 기준)
+                "total_assets": annual.total_assets,
+                "total_liabilities": annual.total_liabilities,
+                "total_equity": annual.total_equity,
+                "current_assets": annual.current_assets,
+                "current_liabilities": annual.current_liabilities,
+                "inventories": annual.inventories,
+
+                # 현금흐름: 연간 - 3Q 누적
+                "operating_cash_flow": (
+                    (annual.operating_cash_flow - q3_statement.operating_cash_flow)
+                    if (annual.operating_cash_flow and q3_statement.operating_cash_flow)
+                    else None
+                ),
+                "investing_cash_flow": (
+                    (annual.investing_cash_flow - q3_statement.investing_cash_flow)
+                    if (annual.investing_cash_flow and q3_statement.investing_cash_flow)
+                    else None
+                ),
+                "financing_cash_flow": (
+                    (annual.financing_cash_flow - q3_statement.financing_cash_flow)
+                    if (annual.financing_cash_flow and q3_statement.financing_cash_flow)
+                    else None
+                ),
+                "capex": (
+                    (annual.capex - q3_statement.capex)
+                    if (annual.capex and q3_statement.capex)
+                    else None
+                ),
+            }
+
+            # 4Q 단독 실적 저장 (fiscal_quarter=4, report_type="quarterly")
+            await save_financial_statement(
+                company_id=company_id,
+                fiscal_year=year,
+                fiscal_quarter=4,
+                report_type="quarterly",
+                data=q4_data
+            )
+
+            logger.info(
+                f"4Q 단독 실적 생성: {stock_code} {year}/4Q "
+                f"(매출액: {q4_data.get('revenue', 0):,}원)"
+            )
