@@ -56,9 +56,9 @@ class PublicDataClient:
             result["actual_date"] = date  # 정확한 날짜로 조회 성공
             return result
 
-        # 2차: 휴장일 → 이전 영업일 탐색 (최대 5일)
+        # 2차: 휴장일 → 이전 영업일 탐색 (최대 10일, 연말 특별 휴장 대응)
         logger.info(f"휴장일 감지: {date} → 이전 영업일 탐색")
-        for days_back in range(1, 6):
+        for days_back in range(1, 11):
             prev_date = self._subtract_days(date, days_back)
             result = self._fetch_market_data(stock_code, prev_date)
             if result:
@@ -67,7 +67,7 @@ class PublicDataClient:
                 result["date"] = date  # 원래 요청한 날짜 유지
                 return result
 
-        logger.warning(f"시가총액 조회 실패: {stock_code}, {date} (5일 이내 영업일 없음)")
+        logger.warning(f"시가총액 조회 실패: {stock_code}, {date} (10일 이내 영업일 없음)")
         return None
 
     def get_market_cap_batch(

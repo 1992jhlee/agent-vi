@@ -278,31 +278,40 @@ async def update_per_pbr(company_id: int, stock_code: str):
     - PBR: 모든 기간에서 시가총액 / total_equity로 직접 계산 (잔액 기반)
     - PER (Q4/연간): 시가총액 / net_income으로 직접 계산 (당해연도 실적 기반)
     - PER (Q1-Q3): pykrx trailing PER 사용 (누적 실적으로 단순 연산 불가)
-    """
-    # DB에서 재무데이터와 필요한 컬럼 조회 (PBR도 포함)
-    async with async_session_factory() as session:
-        result = await session.execute(
-            select(
-                FinancialStatement.fiscal_year,
-                FinancialStatement.fiscal_quarter,
-                FinancialStatement.net_income,
-                FinancialStatement.total_equity,
-                FinancialStatement.pbr,
-            )
-            .where(FinancialStatement.company_id == company_id)
-        )
-        rows = result.all()
 
-    if not rows:
+    에러가 발생해도 부분적으로 계산 가능한 데이터는 저장합니다.
+    """
+    try:
+        # DB에서 재무데이터와 필요한 컬럼 조회 (report_type 포함)
+        async with async_session_factory() as session:
+            result = await session.execute(
+                select(
+                    FinancialStatement.fiscal_year,
+                    FinancialStatement.fiscal_quarter,
+                    FinancialStatement.report_type,
+                    FinancialStatement.net_income,
+                    FinancialStatement.total_equity,
+                    FinancialStatement.pbr,
+                )
+                .where(FinancialStatement.company_id == company_id)
+            )
+            rows = result.all()
+
+        if not rows:
+            logger.warning(f"재무데이터 없음: {stock_code}")
+            return
+    except Exception as e:
+        logger.error(f"재무데이터 조회 실패: {stock_code} - {e}", exc_info=True)
         return
 
-    # 분기별 종료일 및 재무 실적 매핑
-    period_dates: dict[tuple[int, int], str] = {}
-    period_financials: dict[tuple[int, int], dict] = {}
-    for year, quarter, net_income, total_equity, existing_pbr in rows:
+    # 분기별 종료일 및 재무 실적 매핑 (report_type별로 구분)
+    period_dates: dict[tuple[int, int, str], str] = {}
+    period_financials: dict[tuple[int, int, str], dict] = {}
+    for year, quarter, report_type, net_income, total_equity, existing_pbr in rows:
         month, day = _QUARTER_END[quarter]
-        period_dates[(year, quarter)] = f"{year}{month:02d}{day:02d}"
-        period_financials[(year, quarter)] = {
+        key = (year, quarter, report_type)
+        period_dates[key] = f"{year}{month:02d}{day:02d}"
+        period_financials[key] = {
             "net_income": net_income,
             "total_equity": total_equity,
             "existing_pbr": existing_pbr,  # 기존 DB의 PBR
@@ -316,21 +325,26 @@ async def update_per_pbr(company_id: int, stock_code: str):
     public_client = _get_public_data_client()
 
     # 시가총액 배치 조회 (금융위원회 → pykrx fallback)
-    market_data = _get_market_cap_batch_with_fallback(
-        stock_code,
-        dates_to_fetch,
-        public_client,
-        stock_client
-    )
-    has_cap_data = len(market_data) > 0
-    if not has_cap_data:
-        logger.warning(f"시가총액 데이터 없음: {stock_code} — Q4 음수 순이익 PER null 세팅만 수행")
+    market_data = {}
+    try:
+        market_data = _get_market_cap_batch_with_fallback(
+            stock_code,
+            dates_to_fetch,
+            public_client,
+            stock_client
+        )
+        if market_data:
+            logger.info(f"시가총액 조회 성공: {stock_code} ({len(market_data)}/{len(dates_to_fetch)}건)")
+        else:
+            logger.warning(f"시가총액 데이터 없음: {stock_code} — PER/PBR 계산 제한적")
+    except Exception as e:
+        logger.error(f"시가총액 조회 실패: {stock_code} - {e}", exc_info=True)
 
-    updates: dict[tuple[int, int], dict] = {}
+    updates: dict[tuple[int, int, str], dict] = {}
 
-    for (year, quarter), date_str in period_dates.items():
-        net_income = period_financials[(year, quarter)]["net_income"]
-        total_equity = period_financials[(year, quarter)]["total_equity"]
+    for (year, quarter, report_type), date_str in period_dates.items():
+        net_income = period_financials[(year, quarter, report_type)]["net_income"]
+        total_equity = period_financials[(year, quarter, report_type)]["total_equity"]
         set_clause = {}
 
         # 시가총액 기반 계산은 데이터가 있을 때만
@@ -338,8 +352,8 @@ async def update_per_pbr(company_id: int, stock_code: str):
         if data and data.get("market_cap"):
             market_cap = data["market_cap"]
 
-            # PER: Q4에서만 당해연도 실적 기준 계산 (음수 순이익이면 음수 PER)
-            if quarter == 4 and net_income is not None and net_income != 0:
+            # PER: Q4 annual만 연간 실적 기준으로 직접 계산 (이미 누적 순이익)
+            if quarter == 4 and report_type == "annual" and net_income is not None and net_income != 0:
                 set_clause["per"] = market_cap / net_income
 
             # PBR: 모든 기간에서 시가총액 / total_equity
@@ -347,96 +361,156 @@ async def update_per_pbr(company_id: int, stock_code: str):
                 set_clause["pbr"] = market_cap / total_equity
 
         if set_clause:
-            updates[(year, quarter)] = set_clause
+            updates[(year, quarter, report_type)] = set_clause
 
-    # Q1-Q3의 PER 계산
-    quarterly_periods = [(y, q) for y, q in period_dates if q != 4]
+    # Q1-Q4의 PER 계산 (quarterly만 대상, 누적 순이익 기반)
+    quarterly_periods = [(y, q, rt) for y, q, rt in period_dates if rt == "quarterly"]
     if quarterly_periods:
-        # 1차: pykrx fundamentals trailing PER 사용 (가장 정확함)
-        fund_df = stock_client.get_fundamentals_range(stock_code, min_date_adjusted, max_date)
-        if fund_df is not None and not fund_df.empty:
-            for (year, quarter) in quarterly_periods:
-                target_dt = pd.Timestamp(period_dates[(year, quarter)])
-                valid_dates = fund_df.index[fund_df.index <= target_dt]
-                if len(valid_dates) == 0:
-                    continue
-
-                per_val = fund_df.loc[valid_dates[-1]].get("PER")
-                if pd.notna(per_val) and float(per_val) != 0:
-                    updates.setdefault((year, quarter), {})["per"] = float(per_val)
-        else:
-            logger.warning(
-                f"pykrx fundamentals 없음: {stock_code} - "
-                f"분기 PER을 연환산으로 계산합니다"
-            )
-
-        # 2차 fallback: pykrx에서 못 가져온 분기는 시가총액 / (순이익 * 4)로 연환산 계산
-        for (year, quarter) in quarterly_periods:
-            # 이미 pykrx PER가 있으면 스킵
-            if (year, quarter) in updates and "per" in updates[(year, quarter)]:
-                continue
-
-            date_str = period_dates[(year, quarter)]
+        # 누적 순이익 기반 PER 계산
+        # - 1Q: Q1 * 4
+        # - 2Q: (Q1 + Q2) * 2
+        # - 3Q: (Q1 + Q2 + Q3) * 4/3
+        # - 4Q: (Q1 + Q2 + Q3 + Q4) * 1 = 연간 누적
+        for key in quarterly_periods:
+            year, quarter, report_type = key
+            date_str = period_dates[key]
             data = market_data.get(date_str)
 
             if data and data.get("market_cap"):
                 market_cap = data["market_cap"]
-                net_income = period_financials[(year, quarter)]["net_income"]
 
-                # 시가총액과 순이익이 모두 양수일 때만 계산
-                if net_income is not None and net_income > 0:
-                    # 분기 순이익을 4배하여 연환산 (trailing 12개월 근사)
-                    annualized_income = net_income * 4
+                # 해당 분기까지의 누적 순이익 계산
+                cumulative_income = 0
+                quarters_found = 0
+
+                for q in range(1, quarter + 1):
+                    q_key = (year, q, "quarterly")
+                    if q_key in period_financials:
+                        q_income = period_financials[q_key]["net_income"]
+                        if q_income is not None:
+                            cumulative_income += q_income
+                            quarters_found += 1
+
+                # 누적 순이익이 있고, 필요한 분기가 모두 존재하는 경우만 계산
+                if quarters_found == quarter and cumulative_income != 0:
+                    # 연환산: 누적 순이익 * (4 / 분기수)
+                    annualized_income = cumulative_income * (4 / quarter)
                     calculated_per = market_cap / annualized_income
 
-                    updates.setdefault((year, quarter), {})["per"] = calculated_per
+                    updates.setdefault(key, {})["per"] = calculated_per
                     logger.info(
-                        f"{stock_code} {year}Q{quarter} PER 연환산: {calculated_per:.2f} "
-                        f"(시총: {market_cap:,.0f}, 분기순이익*4: {annualized_income:,.0f})"
+                        f"{stock_code} {year}Q{quarter} PER (누적): {calculated_per:.2f} "
+                        f"(시총: {market_cap:,.0f}, 누적순이익: {cumulative_income:,.0f}, "
+                        f"연환산: {annualized_income:,.0f})"
+                    )
+                elif quarters_found < quarter:
+                    logger.warning(
+                        f"{stock_code} {year}Q{quarter} PER 계산 불가: "
+                        f"이전 분기 데이터 부족 ({quarters_found}/{quarter})"
                     )
 
-        # 3차 fallback: 시가총액도 없으면 PBR과 자본총계에서 시가총액 역산 후 PER 계산
+        # 2차 fallback: 시가총액도 없으면 PBR과 자본총계에서 시가총액 역산 후 PER 계산
         # PBR은 이미 계산되어 updates에 있거나 기존 DB에 있을 수 있음
-        for (year, quarter) in quarterly_periods:
+        for key in quarterly_periods:
+            year, quarter, report_type = key
             # 이미 PER가 있으면 스킵
-            if (year, quarter) in updates and "per" in updates[(year, quarter)]:
+            if key in updates and "per" in updates[key]:
                 continue
 
-            net_income = period_financials[(year, quarter)]["net_income"]
-            total_equity = period_financials[(year, quarter)]["total_equity"]
+            total_equity = period_financials[key]["total_equity"]
 
             # PBR 우선순위: 1) updates에 새로 계산된 값, 2) 기존 DB 값
-            pbr = updates.get((year, quarter), {}).get("pbr")
+            pbr = updates.get(key, {}).get("pbr")
             if not pbr:
-                pbr = period_financials[(year, quarter)].get("existing_pbr")
+                pbr = period_financials[key].get("existing_pbr")
 
-            if pbr and total_equity and total_equity > 0 and net_income and net_income > 0:
-                # PBR = 시가총액 / 자본총계 → 시가총액 = PBR * 자본총계
-                market_cap = pbr * total_equity
-                annualized_income = net_income * 4
-                calculated_per = market_cap / annualized_income
+            if pbr and total_equity and total_equity > 0:
+                # 해당 분기까지의 누적 순이익 계산
+                cumulative_income = 0
+                quarters_found = 0
 
-                updates.setdefault((year, quarter), {})["per"] = calculated_per
-                logger.info(
-                    f"{stock_code} {year}Q{quarter} PER PBR역산: {calculated_per:.2f} "
-                    f"(PBR: {pbr:.2f}, 자본: {total_equity:,.0f}, 순이익*4: {annualized_income:,.0f})"
+                for q in range(1, quarter + 1):
+                    q_key = (year, q, "quarterly")
+                    if q_key in period_financials:
+                        q_income = period_financials[q_key]["net_income"]
+                        if q_income is not None:
+                            cumulative_income += q_income
+                            quarters_found += 1
+
+                # 누적 순이익이 있고, 필요한 분기가 모두 존재하는 경우만 계산
+                if quarters_found == quarter and cumulative_income != 0:
+                    # PBR = 시가총액 / 자본총계 → 시가총액 = PBR * 자본총계
+                    market_cap = pbr * total_equity
+                    # 연환산: 누적 순이익 * (4 / 분기수)
+                    annualized_income = cumulative_income * (4 / quarter)
+                    calculated_per = market_cap / annualized_income
+
+                    updates.setdefault(key, {})["per"] = calculated_per
+                    logger.info(
+                        f"{stock_code} {year}Q{quarter} PER PBR역산(누적): {calculated_per:.2f} "
+                        f"(PBR: {pbr:.2f}, 자본: {total_equity:,.0f}, "
+                        f"누적순이익: {cumulative_income:,.0f}, 연환산: {annualized_income:,.0f})"
+                    )
+
+    # DB 업데이트 (각 기간별로 개별 트랜잭션으로 처리하여 부분 실패 허용)
+    success_count = 0
+    fail_count = 0
+
+    for key, set_clause in updates.items():
+        year, quarter, report_type = key
+        try:
+            async with async_session_factory() as session:
+                await session.execute(
+                    update(FinancialStatement)
+                    .where(
+                        FinancialStatement.company_id == company_id,
+                        FinancialStatement.fiscal_year == year,
+                        FinancialStatement.fiscal_quarter == quarter,
+                        FinancialStatement.report_type == report_type,
+                    )
+                    .values(**set_clause)
                 )
-
-    # DB 업데이트
-    async with async_session_factory() as session:
-        for (year, quarter), set_clause in updates.items():
-            await session.execute(
-                update(FinancialStatement)
-                .where(
-                    FinancialStatement.company_id == company_id,
-                    FinancialStatement.fiscal_year == year,
-                    FinancialStatement.fiscal_quarter == quarter,
-                )
-                .values(**set_clause)
+                await session.commit()
+                success_count += 1
+        except Exception as e:
+            logger.error(
+                f"DB 업데이트 실패: {stock_code} {year}Q{quarter} ({report_type}) - {e}",
+                exc_info=True
             )
-        await session.commit()
+            fail_count += 1
 
-    logger.info(f"PER/PBR 업데이트 완료: {stock_code} ({len(updates)}건)")
+    # NULL 원인 로깅 (PER/PBR이 업데이트되지 않은 기간)
+    updated_periods = set(updates.keys())
+    all_periods = set(period_dates.keys())
+    null_periods = all_periods - updated_periods
+
+    if null_periods:
+        null_details = []
+        for key in sorted(null_periods):
+            year, quarter, report_type = key
+            net_income = period_financials[key]["net_income"]
+            total_equity = period_financials[key]["total_equity"]
+            date_str = period_dates[key]
+            has_market_cap = date_str in market_data
+
+            reasons = []
+            if not has_market_cap:
+                reasons.append("시가총액 없음")
+            if net_income is None or net_income <= 0:
+                reasons.append(f"순이익 {'없음' if net_income is None else '음수/0'}")
+            if total_equity is None or total_equity <= 0:
+                reasons.append("자본총계 없음/음수")
+
+            null_details.append(f"{year}Q{quarter}/{report_type}({', '.join(reasons)})")
+
+        logger.info(
+            f"PER/PBR NULL 유지: {stock_code} {len(null_periods)}건 - {', '.join(null_details)}"
+        )
+
+    logger.info(
+        f"PER/PBR 업데이트 완료: {stock_code} "
+        f"(성공: {success_count}, 실패: {fail_count}, NULL: {len(null_periods)})"
+    )
 
 
 def _get_public_data_client():
@@ -498,11 +572,11 @@ def _get_market_cap_batch_with_fallback(
             min_date = min(missing_dates)
             max_date = max(missing_dates)
 
-            # 휴장일 대응: 앞뒤 30일 여유
+            # 휴장일 대응: 앞 45일, 뒤 7일 여유 (연말 특별 휴장 대응)
             min_date_dt = datetime.strptime(min_date, "%Y%m%d")
             max_date_dt = datetime.strptime(max_date, "%Y%m%d")
 
-            start = (min_date_dt - timedelta(days=30)).strftime("%Y%m%d")
+            start = (min_date_dt - timedelta(days=45)).strftime("%Y%m%d")
             end = (max_date_dt + timedelta(days=7)).strftime("%Y%m%d")
 
             cap_df = stock_client.get_market_cap(stock_code, start, end)

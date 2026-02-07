@@ -322,6 +322,45 @@ class DARTClient:
                             )
                             break
 
+            # net_income fallback: 표준 계정코드 미사용 시 account_nm으로 직접 매칭
+            if "net_income" not in result:
+                # 1차: 법인세비용차감전순이익 (세전 이익, 차선책)
+                mask = (df["account_id"] == "ifrs-full_ProfitLossBeforeTax") & (df["sj_div"].isin(["IS", "CIS"]))
+                rows = df[mask]
+                for _, row in rows.iterrows():
+                    val = self._extract_value(row.get("thstrm_amount", 0))
+                    if val is not None:
+                        result["net_income"] = val
+                        logger.debug(f"net_income fallback: ProfitLossBeforeTax = {val}")
+                        break
+
+            # net_income fallback 2: 비표준 계정과목명 매칭 (분기순이익, 당기순이익 등)
+            if "net_income" not in result:
+                _net_income_nm_keywords = ["분기순이익", "당기순이익", "반기순이익"]
+                nm_mask = (
+                    (df["account_id"] == "-표준계정코드 미사용-")
+                    & (df["sj_div"].isin(["IS", "CIS"]))
+                )
+                # 최하위 계층의 순이익을 찾기 위해 역순으로 탐색
+                candidate_rows = []
+                for _, row in df[nm_mask].iterrows():
+                    nm = str(row.get("account_nm", "")).strip()
+                    for keyword in _net_income_nm_keywords:
+                        if keyword in nm:
+                            val = self._extract_value(row.get("thstrm_amount", 0))
+                            if val is not None:
+                                candidate_rows.append((nm, val, row.name))
+                                break
+
+                if candidate_rows:
+                    # 가장 마지막 행(최하위 계층)의 순이익 사용
+                    last_row = candidate_rows[-1]
+                    result["net_income"] = last_row[1]
+                    logger.debug(
+                        f"net_income nm-fallback: nm='{last_row[0]}' value={last_row[1]} "
+                        f"({len(candidate_rows)}개 후보 중 마지막 선택)"
+                    )
+
             logger.debug(f"재무 데이터 파싱 완료: {len(result)} 항목")
 
         except Exception as e:
