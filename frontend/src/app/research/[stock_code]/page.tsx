@@ -1,0 +1,85 @@
+import { notFound } from "next/navigation";
+import Link from "next/link";
+import { getCompany, getFinancials } from "@/lib/api";
+import FinancialTabView from "@/components/companies/FinancialTabView";
+import RefreshFinancialButton from "@/components/companies/RefreshFinancialButton";
+
+interface Props {
+  params: Promise<{ stock_code: string }>;
+}
+
+export default async function CompanyDetailPage({ params }: Props) {
+  const { stock_code } = await params;
+
+  try {
+    const company = await getCompany(stock_code);
+    const financialData = await getFinancials(stock_code, 6);
+
+    // 연간 실적 (report_type === 'annual')
+    const annualData = financialData.statements
+      .filter((s: any) => s.report_type === 'annual')
+      .sort((a: any, b: any) => b.fiscal_year - a.fiscal_year)
+      .slice(0, 6);
+
+    // 분기 실적 (report_type === 'quarterly')
+    const quarterlyData = financialData.statements
+      .filter((s: any) => s.report_type === 'quarterly')
+      .sort((a: any, b: any) => {
+        if (a.fiscal_year !== b.fiscal_year) {
+          return b.fiscal_year - a.fiscal_year;
+        }
+        return b.fiscal_quarter - a.fiscal_quarter;
+      })
+      .slice(0, 8);
+
+    return (
+      <div className="container mx-auto px-4 py-8">
+        {/* 뒤로 가기 버튼 */}
+        <div className="mb-6">
+          <Link
+            href="/research"
+            className="inline-flex items-center text-blue-600 hover:text-blue-800 transition-colors"
+          >
+            <svg
+              className="w-5 h-5 mr-2"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M10 19l-7-7m0 0l7-7m-7 7h18"
+              />
+            </svg>
+            목록으로 돌아가기
+          </Link>
+        </div>
+
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold mb-2">{company.company_name}</h1>
+          <p className="text-gray-600">
+            {stock_code} · {company.market}
+            {company.sector && ` · ${company.sector}`}
+          </p>
+        </div>
+
+        {/* 재무 데이터 갱신 버튼 */}
+        {(annualData.length === 0 || quarterlyData.length === 0) && (
+          <div className="mb-8 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+            <p className="text-sm text-yellow-800 mb-3">
+              재무 데이터가 없거나 부족합니다. 아래 버튼을 눌러 데이터를 수집해주세요.
+            </p>
+            <RefreshFinancialButton stockCode={stock_code} />
+          </div>
+        )}
+
+        {/* 재무 실적 (연간/분기 토글) */}
+        <FinancialTabView annualData={annualData} quarterlyData={quarterlyData} />
+      </div>
+    );
+  } catch (e) {
+    notFound();
+  }
+}

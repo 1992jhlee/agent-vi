@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import SessionProvider from "@/components/SessionProvider";
-import AuthButton from "@/components/AuthButton";
+import MainNav from "@/components/navigation/MainNav";
 
 export const metadata: Metadata = {
   title: "Agent-VI | 가치투자 기업 분석",
@@ -18,25 +18,7 @@ export default function RootLayout({
     <html lang="ko">
       <body className="min-h-screen bg-gray-50 text-gray-900 antialiased">
         <SessionProvider>
-        <header className="border-b bg-white">
-          <nav className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4">
-            <a href="/" className="text-xl font-bold tracking-tight">
-              Agent-VI
-            </a>
-            <div className="flex items-center gap-6 text-sm">
-              <a href="/reports" className="hover:text-blue-600">
-                보고서
-              </a>
-              <a href="/companies" className="hover:text-blue-600">
-                기업 목록
-              </a>
-              <a href="/admin" className="hover:text-blue-600">
-                관리자
-              </a>
-              <AuthButton />
-            </div>
-          </nav>
-        </header>
+        <MainNav />
         <main className="mx-auto max-w-6xl px-4 py-8">{children}</main>
         <footer className="border-t bg-white py-6 text-center text-sm text-gray-500">
           Agent-VI &mdash; 가치투자 기업 분석 에이전트
