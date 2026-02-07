@@ -14,6 +14,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.data_sources.dart_client import DARTClient
 from app.data_sources.stock_client import StockClient
+from app.data_sources.dart_web_scraper import get_dart_web_financials
 from app.db.models import FinancialStatement
 from app.db.session import async_session_factory
 
@@ -184,6 +185,14 @@ async def collect_financial_data(
         f"재무데이터 수집 완료: {stock_code} "
         f"(수집: {collected}, 스킵: {skipped}, 실패: {failed})"
     )
+
+    # 다중 소스 fallback (DART 실패한 연간 데이터만)
+    if failed > 0:
+        fallback_collected = await try_multi_source_fallback(company_id, stock_code, corp_code, targets)
+        if fallback_collected > 0:
+            collected += fallback_collected
+            failed -= fallback_collected
+            logger.info(f"Fallback으로 {fallback_collected}건 추가 수집")
 
     # PER/PBR 수집 (pykrx)
     try:
@@ -811,7 +820,75 @@ async def generate_q4_standalone_statements(company_id: int, stock_code: str):
                 data=q4_data
             )
 
+            revenue_str = f"{q4_data.get('revenue'):,}원" if q4_data.get('revenue') else "N/A"
             logger.info(
                 f"4Q 단독 실적 생성: {stock_code} {year}/4Q "
-                f"(매출액: {q4_data.get('revenue', 0):,}원)"
+                f"(매출액: {revenue_str})"
             )
+
+async def try_multi_source_fallback(
+    company_id: int,
+    stock_code: str,
+    corp_code: str,
+    targets: list[tuple[int, int, str]]
+) -> int:
+    """
+    DART 웹 크롤링으로 DART API 실패한 연간 데이터 수집
+
+    OpenDartReader의 list 메서드와 fnlttSinglAcnt API를 사용하여
+    DART API(finstate_all)가 제공하지 않는 과거 재무제표를 가져옵니다.
+
+    Args:
+        company_id: Company.id
+        stock_code: 종목코드
+        corp_code: DART 기업코드
+        targets: DART API에서 시도했던 (year, quarter, report_type) 목록
+
+    Returns:
+        성공적으로 수집한 건수
+    """
+    # 연간 데이터만 시도 (quarter=4, report_type="annual")
+    annual_years = [
+        year for year, quarter, report_type in targets
+        if quarter == 4 and report_type == "annual"
+    ]
+
+    if not annual_years:
+        return 0
+
+    collected = 0
+
+    # DART API 실패한 각 연도에 대해 웹 크롤링 시도
+    for year in annual_years:
+        try:
+            # DART 웹 크롤링
+            logger.info(f"DART 웹 크롤링 시도: {stock_code} {year}년")
+            data = get_dart_web_financials(corp_code, year)
+
+            # 데이터가 있으면 저장
+            if data and any(data.values()):
+                await save_financial_statement(
+                    company_id=company_id,
+                    fiscal_year=year,
+                    fiscal_quarter=4,
+                    report_type="annual",
+                    data=data,
+                    metadata={"source": "dart_web", "fallback": True}
+                )
+
+                collected += 1
+                revenue_str = f"{data.get('revenue'):,}원" if data.get('revenue') else "N/A"
+                logger.info(
+                    f"DART 웹 크롤링 저장: {stock_code} {year}년 (매출액: {revenue_str})"
+                )
+            else:
+                logger.warning(f"DART 웹 크롤링 실패: {stock_code} {year}년 - 데이터를 얻을 수 없습니다")
+
+        except Exception as e:
+            logger.error(f"Fallback 오류: {stock_code} {year}년 - {e}", exc_info=True)
+            continue
+
+    if collected > 0:
+        logger.info(f"Fallback 수집 완료: {stock_code} (총 {collected}건)")
+
+    return collected

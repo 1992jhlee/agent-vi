@@ -106,12 +106,23 @@ class DARTClient:
                     f"corp_code={corp_code}, year={year}, type={report_type}"
                 )
 
-                # fnlttSinglAcntAll: 재무제표 전체 (단일회사)
+                # 1차: 연결재무제표(CFS) 시도
                 df = self.client.finstate_all(
                     corp=corp_code,
                     bsns_year=year,
-                    reprt_code=report_code
+                    reprt_code=report_code,
+                    fs_div="CFS"
                 )
+
+                # 2차: 연결재무제표가 없으면 개별재무제표(OFS) 시도
+                if df is None or df.empty:
+                    logger.info(f"연결재무제표 없음, 개별재무제표(OFS) 시도: {corp_code} {year}")
+                    df = self.client.finstate_all(
+                        corp=corp_code,
+                        bsns_year=year,
+                        reprt_code=report_code,
+                        fs_div="OFS"
+                    )
 
                 if df is None or df.empty:
                     logger.warning(f"재무제표 데이터가 없습니다: {corp_code} {year} {report_type}")
@@ -361,12 +372,72 @@ class DARTClient:
                         f"({len(candidate_rows)}개 후보 중 마지막 선택)"
                     )
 
+            # 금융업 특화 파싱 (Revenue/OperatingIncomeLoss 태그 없을 때)
+            if "revenue" not in result or "operating_income" not in result:
+                self._parse_financial_industry(df, result)
+
             logger.debug(f"재무 데이터 파싱 완료: {len(result)} 항목")
 
         except Exception as e:
             logger.error(f"재무 데이터 파싱 오류: {e}", exc_info=True)
 
         return result
+
+    def _parse_financial_industry(self, df: pd.DataFrame, result: dict):
+        """
+        금융업(은행, 증권, 보험 등) 재무제표 파싱
+
+        금융업은 일반 제조업과 다른 구조를 사용:
+        - Revenue 대신: 수수료수익 + 이자수익 등
+        - OperatingIncomeLoss 대신: 순영업손익
+
+        Args:
+            df: 재무제표 DataFrame
+            result: 파싱 결과 딕셔너리 (in-place 수정)
+        """
+        is_df = df[df['sj_div'].isin(['IS', 'CIS'])]
+
+        # 1. 매출액 추정: 수수료수익 + 이자수익
+        if "revenue" not in result:
+            fee_income = None
+            interest_income = None
+
+            # 수수료수익
+            fee_rows = is_df[is_df['account_id'] == 'ifrs-full_FeeAndCommissionIncome']
+            for _, row in fee_rows.iterrows():
+                val = self._extract_value(row.get('thstrm_amount', 0))
+                if val is not None:
+                    fee_income = val
+                    break
+
+            # 이자수익
+            interest_rows = is_df[is_df['account_id'] == 'ifrs-full_RevenueFromInterest']
+            for _, row in interest_rows.iterrows():
+                val = self._extract_value(row.get('thstrm_amount', 0))
+                if val is not None:
+                    interest_income = val
+                    break
+
+            # 합산
+            if fee_income is not None or interest_income is not None:
+                result["revenue"] = (fee_income or 0) + (interest_income or 0)
+                logger.info(
+                    f"금융업 매출액 추정: 수수료수익({fee_income or 0:,}) + "
+                    f"이자수익({interest_income or 0:,}) = {result['revenue']:,}"
+                )
+
+        # 2. 영업이익 추정: 순영업손익
+        if "operating_income" not in result:
+            # "순영업손익" account_nm으로 검색 (표준 태그 없음)
+            nm_mask = is_df['account_nm'].str.contains('순영업손익', case=False, na=False)
+            oi_rows = is_df[nm_mask]
+
+            for _, row in oi_rows.iterrows():
+                val = self._extract_value(row.get('thstrm_amount', 0))
+                if val is not None:
+                    result["operating_income"] = val
+                    logger.info(f"금융업 영업이익 추정: 순영업손익 = {val:,}")
+                    break
 
     def _extract_value(self, value: Any) -> int | None:
         """
