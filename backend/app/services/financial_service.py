@@ -279,7 +279,7 @@ async def update_per_pbr(company_id: int, stock_code: str):
     - PER (Q4/연간): 시가총액 / net_income으로 직접 계산 (당해연도 실적 기반)
     - PER (Q1-Q3): pykrx trailing PER 사용 (누적 실적으로 단순 연산 불가)
     """
-    # DB에서 재무데이터와 필요한 컬럼 조회
+    # DB에서 재무데이터와 필요한 컬럼 조회 (PBR도 포함)
     async with async_session_factory() as session:
         result = await session.execute(
             select(
@@ -287,6 +287,7 @@ async def update_per_pbr(company_id: int, stock_code: str):
                 FinancialStatement.fiscal_quarter,
                 FinancialStatement.net_income,
                 FinancialStatement.total_equity,
+                FinancialStatement.pbr,
             )
             .where(FinancialStatement.company_id == company_id)
         )
@@ -298,28 +299,30 @@ async def update_per_pbr(company_id: int, stock_code: str):
     # 분기별 종료일 및 재무 실적 매핑
     period_dates: dict[tuple[int, int], str] = {}
     period_financials: dict[tuple[int, int], dict] = {}
-    for year, quarter, net_income, total_equity in rows:
+    for year, quarter, net_income, total_equity, existing_pbr in rows:
         month, day = _QUARTER_END[quarter]
         period_dates[(year, quarter)] = f"{year}{month:02d}{day:02d}"
         period_financials[(year, quarter)] = {
             "net_income": net_income,
             "total_equity": total_equity,
+            "existing_pbr": existing_pbr,  # 기존 DB의 PBR
         }
 
-    min_date = min(period_dates.values())
-    max_date = max(period_dates.values())
+    # 필요한 날짜 목록 생성 (분기 종료일만)
+    dates_to_fetch = list(period_dates.values())
 
-    # 휴장일 대응: min_date를 30일 앞당겨서 분기 종료일이 휴장일인 경우에도
-    # 이전 영업일의 시가총액 데이터를 포함할 수 있도록 함
-    # 예: 2019-12-31이 휴장일이면 pykrx는 2020-01-02부터 반환하여 2019-12-30 누락 방지
-    min_date_dt = datetime.strptime(min_date, "%Y%m%d")
-    min_date_adjusted = (min_date_dt - timedelta(days=30)).strftime("%Y%m%d")
-
+    # 데이터 소스 초기화
     stock_client = StockClient()
+    public_client = _get_public_data_client()
 
-    # 시가총액 범위 조회 (단일 API 호출) — PBR 및 Q4 PER 계산용
-    cap_df = stock_client.get_market_cap(stock_code, min_date_adjusted, max_date)
-    has_cap_data = cap_df is not None and not cap_df.empty
+    # 시가총액 배치 조회 (금융위원회 → pykrx fallback)
+    market_data = _get_market_cap_batch_with_fallback(
+        stock_code,
+        dates_to_fetch,
+        public_client,
+        stock_client
+    )
+    has_cap_data = len(market_data) > 0
     if not has_cap_data:
         logger.warning(f"시가총액 데이터 없음: {stock_code} — Q4 음수 순이익 PER null 세팅만 수행")
 
@@ -331,28 +334,25 @@ async def update_per_pbr(company_id: int, stock_code: str):
         set_clause = {}
 
         # 시가총액 기반 계산은 데이터가 있을 때만
-        if has_cap_data:
-            target_dt = pd.Timestamp(date_str)
-            valid_dates = cap_df.index[cap_df.index <= target_dt]
-            if len(valid_dates) > 0:
-                market_cap_val = cap_df.loc[valid_dates[-1], "market_cap"]
-                if pd.notna(market_cap_val) and float(market_cap_val) > 0:
-                    market_cap = float(market_cap_val)
+        data = market_data.get(date_str)
+        if data and data.get("market_cap"):
+            market_cap = data["market_cap"]
 
-                    # PER: Q4에서만 당해연도 실적 기준 계산 (음수 순이익이면 음수 PER)
-                    if quarter == 4 and net_income is not None and net_income != 0:
-                        set_clause["per"] = market_cap / net_income
+            # PER: Q4에서만 당해연도 실적 기준 계산 (음수 순이익이면 음수 PER)
+            if quarter == 4 and net_income is not None and net_income != 0:
+                set_clause["per"] = market_cap / net_income
 
-                    # PBR: 모든 기간에서 시가총액 / total_equity
-                    if total_equity is not None and total_equity > 0:
-                        set_clause["pbr"] = market_cap / total_equity
+            # PBR: 모든 기간에서 시가총액 / total_equity
+            if total_equity is not None and total_equity > 0:
+                set_clause["pbr"] = market_cap / total_equity
 
         if set_clause:
             updates[(year, quarter)] = set_clause
 
-    # Q1-Q3의 PER는 pykrx fundamentals trailing PER로 보완 (단일 API 호출)
+    # Q1-Q3의 PER 계산
     quarterly_periods = [(y, q) for y, q in period_dates if q != 4]
     if quarterly_periods:
+        # 1차: pykrx fundamentals trailing PER 사용 (가장 정확함)
         fund_df = stock_client.get_fundamentals_range(stock_code, min_date_adjusted, max_date)
         if fund_df is not None and not fund_df.empty:
             for (year, quarter) in quarterly_periods:
@@ -364,6 +364,63 @@ async def update_per_pbr(company_id: int, stock_code: str):
                 per_val = fund_df.loc[valid_dates[-1]].get("PER")
                 if pd.notna(per_val) and float(per_val) != 0:
                     updates.setdefault((year, quarter), {})["per"] = float(per_val)
+        else:
+            logger.warning(
+                f"pykrx fundamentals 없음: {stock_code} - "
+                f"분기 PER을 연환산으로 계산합니다"
+            )
+
+        # 2차 fallback: pykrx에서 못 가져온 분기는 시가총액 / (순이익 * 4)로 연환산 계산
+        for (year, quarter) in quarterly_periods:
+            # 이미 pykrx PER가 있으면 스킵
+            if (year, quarter) in updates and "per" in updates[(year, quarter)]:
+                continue
+
+            date_str = period_dates[(year, quarter)]
+            data = market_data.get(date_str)
+
+            if data and data.get("market_cap"):
+                market_cap = data["market_cap"]
+                net_income = period_financials[(year, quarter)]["net_income"]
+
+                # 시가총액과 순이익이 모두 양수일 때만 계산
+                if net_income is not None and net_income > 0:
+                    # 분기 순이익을 4배하여 연환산 (trailing 12개월 근사)
+                    annualized_income = net_income * 4
+                    calculated_per = market_cap / annualized_income
+
+                    updates.setdefault((year, quarter), {})["per"] = calculated_per
+                    logger.info(
+                        f"{stock_code} {year}Q{quarter} PER 연환산: {calculated_per:.2f} "
+                        f"(시총: {market_cap:,.0f}, 분기순이익*4: {annualized_income:,.0f})"
+                    )
+
+        # 3차 fallback: 시가총액도 없으면 PBR과 자본총계에서 시가총액 역산 후 PER 계산
+        # PBR은 이미 계산되어 updates에 있거나 기존 DB에 있을 수 있음
+        for (year, quarter) in quarterly_periods:
+            # 이미 PER가 있으면 스킵
+            if (year, quarter) in updates and "per" in updates[(year, quarter)]:
+                continue
+
+            net_income = period_financials[(year, quarter)]["net_income"]
+            total_equity = period_financials[(year, quarter)]["total_equity"]
+
+            # PBR 우선순위: 1) updates에 새로 계산된 값, 2) 기존 DB 값
+            pbr = updates.get((year, quarter), {}).get("pbr")
+            if not pbr:
+                pbr = period_financials[(year, quarter)].get("existing_pbr")
+
+            if pbr and total_equity and total_equity > 0 and net_income and net_income > 0:
+                # PBR = 시가총액 / 자본총계 → 시가총액 = PBR * 자본총계
+                market_cap = pbr * total_equity
+                annualized_income = net_income * 4
+                calculated_per = market_cap / annualized_income
+
+                updates.setdefault((year, quarter), {})["per"] = calculated_per
+                logger.info(
+                    f"{stock_code} {year}Q{quarter} PER PBR역산: {calculated_per:.2f} "
+                    f"(PBR: {pbr:.2f}, 자본: {total_equity:,.0f}, 순이익*4: {annualized_income:,.0f})"
+                )
 
     # DB 업데이트
     async with async_session_factory() as session:
@@ -380,6 +437,98 @@ async def update_per_pbr(company_id: int, stock_code: str):
         await session.commit()
 
     logger.info(f"PER/PBR 업데이트 완료: {stock_code} ({len(updates)}건)")
+
+
+def _get_public_data_client():
+    """
+    금융위원회 공공데이터 API 클라이언트 생성
+
+    Returns:
+        PublicDataClient 또는 None (서비스 키 미설정 시)
+    """
+    from app.config import settings
+    from app.data_sources.public_data_client import PublicDataClient
+
+    if not settings.public_data_service_key:
+        logger.info("PUBLIC_DATA_SERVICE_KEY 미설정 - 금융위원회 API 사용 불가")
+        return None
+
+    return PublicDataClient(settings.public_data_service_key)
+
+
+def _get_market_cap_batch_with_fallback(
+    stock_code: str,
+    dates: list[str],
+    public_client,
+    stock_client: StockClient
+) -> dict[str, dict]:
+    """
+    시가총액 배치 조회 (금융위원회 → pykrx fallback)
+
+    Args:
+        stock_code: 종목코드
+        dates: 조회할 날짜 리스트 (YYYYMMDD 형식)
+        public_client: PublicDataClient 또는 None
+        stock_client: StockClient
+
+    Returns:
+        {"20240630": {"market_cap": 123..., ...}, ...}
+    """
+    results = {}
+
+    # 1차: 금융위원회 API
+    if public_client:
+        try:
+            results = public_client.get_market_cap_batch(stock_code, dates)
+            if results:
+                logger.info(
+                    f"✓ 시가총액: 금융위원회 ({stock_code}, {len(results)}/{len(dates)}건)"
+                )
+                # 전부 성공하면 바로 반환
+                if len(results) == len(dates):
+                    return results
+        except Exception as e:
+            logger.warning(f"금융위원회 API 실패: {e} → pykrx fallback")
+
+    # 2차: pykrx (실패한 날짜만)
+    missing_dates = [d for d in dates if d not in results]
+    if missing_dates:
+        try:
+            # 최소/최대 날짜 범위로 조회
+            min_date = min(missing_dates)
+            max_date = max(missing_dates)
+
+            # 휴장일 대응: 앞뒤 30일 여유
+            min_date_dt = datetime.strptime(min_date, "%Y%m%d")
+            max_date_dt = datetime.strptime(max_date, "%Y%m%d")
+
+            start = (min_date_dt - timedelta(days=30)).strftime("%Y%m%d")
+            end = (max_date_dt + timedelta(days=7)).strftime("%Y%m%d")
+
+            cap_df = stock_client.get_market_cap(stock_code, start, end)
+
+            if cap_df is not None and not cap_df.empty:
+                for date_str in missing_dates:
+                    target_dt = pd.Timestamp(date_str)
+                    valid_dates = cap_df.index[cap_df.index <= target_dt]
+
+                    if len(valid_dates) > 0:
+                        market_cap = cap_df.loc[valid_dates[-1], "market_cap"]
+                        if pd.notna(market_cap) and float(market_cap) > 0:
+                            results[date_str] = {
+                                "market_cap": float(market_cap),
+                                "date": date_str
+                            }
+
+                logger.info(
+                    f"✓ 시가총액: pykrx fallback ({stock_code}, "
+                    f"{len([d for d in missing_dates if d in results])}건)"
+                )
+
+        except Exception as e:
+            logger.error(f"pykrx fallback 실패: {e}")
+
+    return results
 
 
 async def convert_cashflow_to_standalone(
@@ -507,6 +656,18 @@ async def generate_q4_standalone_statements(company_id: int, stock_code: str):
                 .order_by(FinancialStatement.fiscal_quarter)
             )
             q1_q2_statements = result_q1_q2.scalars().all()
+
+            # 1Q, 2Q, 3Q가 모두 있는지 확인
+            quarters_present = {stmt.fiscal_quarter for stmt in q1_q2_statements}
+            quarters_present.add(3)  # 3Q는 이미 확인됨
+
+            if quarters_present != {1, 2, 3}:
+                missing = {1, 2, 3} - quarters_present
+                logger.warning(
+                    f"{year}년 4Q 단독 생성 불가: {missing} 분기 데이터 누락 - "
+                    f"1Q, 2Q, 3Q가 모두 있어야 정확한 계산 가능"
+                )
+                continue
 
             # 손익계산서는 DART가 단독으로 제공하므로 1Q+2Q+3Q 합산
             q1_q2_q3_sum = {}

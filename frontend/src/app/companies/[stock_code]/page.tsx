@@ -15,15 +15,15 @@ export default async function CompanyDetailPage({ params }: Props) {
     const company = await getCompany(stock_code);
     const financialData = await getFinancials(stock_code, 6);
 
-    // 연간 실적 (fiscal_quarter === 4)
+    // 연간 실적 (report_type === 'annual')
     const annualData = financialData.statements
-      .filter((s: any) => s.fiscal_quarter === 4)
+      .filter((s: any) => s.report_type === 'annual')
       .sort((a: any, b: any) => b.fiscal_year - a.fiscal_year)
       .slice(0, 6);
 
-    // 분기 실적 (fiscal_quarter !== 4)
+    // 분기 실적 (report_type === 'quarterly')
     const quarterlyData = financialData.statements
-      .filter((s: any) => s.fiscal_quarter !== 4)
+      .filter((s: any) => s.report_type === 'quarterly')
       .sort((a: any, b: any) => {
         if (a.fiscal_year !== b.fiscal_year) {
           return b.fiscal_year - a.fiscal_year;

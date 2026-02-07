@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     naver_client_id: str = ""
     naver_client_secret: str = ""
 
+    # 금융위원회 공공데이터 API (재무정보 PER/PBR 계산용)
+    public_data_service_key: str = ""
+
     # YouTube Data API
     youtube_api_key: str = ""
 

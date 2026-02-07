@@ -81,7 +81,7 @@ pytest
 
 **라우팅:** 모든 라우트는 `app/api/router.py`를 통해 `/api/v1` 하위에 있습니다. 각 도메인별로 `app/api/v1/`에 모듈이 있습니다: `stocks`, `companies`, `financials`, `analysis`, `reports`, `health`.
 
-**설정:** `app/config.py` — `.env`를 읽는 Pydantic `Settings` 인스턴스 하나(`settings`)입니다. 다른 모든 모듈은 `from app.config import settings`로 가져옵니다. DART, Naver, OpenAI, Anthropic의 API 키가 여기에 있습니다.
+**설정:** `app/config.py` — `.env`를 읽는 Pydantic `Settings` 인스턴스 하나(`settings`)입니다. 다른 모든 모듈은 `from app.config import settings`로 가져옵니다. DART, Naver, OpenAI, Anthropic, 금융위원회 공공데이터의 API 키가 여기에 있습니다.
 
 **데이터베이스 — 세션 패턴 두 가지 (주의):**
 - `app/db/session.py`는 **비동기** 엔진(`engine`, `async_session_factory`, `get_db` 의존성)과 **동기** 엔진(`sync_engine`, `sync_session_factory`, `get_sync_session`)을 모두 내보냅니다.
@@ -91,8 +91,16 @@ pytest
 
 **데이터 소스 (`app/data_sources/`):** 외부 API의 얇은 래퍼입니다:
 - `dart_client.py` — OpenDartReader 기반; DART에서 재무제표를 조회하고 파싱합니다. "매출액" 필드가 없을 때 손익계산서 최상단 수익 항목으로 추정하는 스마트 파싱 로직이 있으며, 이를 메타데이터에 기록합니다.
-- `stock_client.py` — pykrx 기반; OHLCV + 펀더멘털 (PER, PBR, 배당수익률). 종목 검색 엔드포인트는 KOSPI/KOSDAQ 전체 종목 리스트를 메모리에 캐시합니다.
+- `public_data_client.py` — 금융위원회 공공데이터 API 기반; 과거 시가총액 조회 (재무정보 페이지 PER/PBR 계산용). LRU 캐시(maxsize=5000)를 통해 과거 데이터를 영구 캐싱합니다. 종목명 매핑이 필요하며, DB 조회로 자동 fallback합니다.
+- `stock_client.py` — pykrx 기반; OHLCV + 펀더멘털 (PER, PBR, 배당수익률). 종목 검색 엔드포인트는 KOSPI/KOSDAQ 전체 종목 리스트를 메모리에 캐시합니다. **PER/PBR 계산에서는 금융위원회 API의 2차 fallback으로 사용됩니다.**
 - `naver_client.py` — Naver 뉴스/블로그 검색 API.
+
+**PER/PBR 계산 전략 (재무정보 페이지):**
+재무정보 페이지에 표시되는 PER/PBR은 **과거 분기말/연말 시점**의 시가총액 기반입니다. 2단계 fallback 구조:
+1. **1차: 금융위원회 공공데이터 API** — 필요한 날짜만 배치 조회 (예: 8개 분기의 종료일). 정부 공식 데이터로 법적으로 안전하며 D+1 데이터 제공. 캐싱으로 호출 제한 문제 없음.
+2. **2차: pykrx fallback** — 금융위원회 API 실패 시 pykrx로 자동 전환. 범위 조회 방식이지만 휴장일 대응을 위해 전후 여유를 둡니다.
+
+> 참고: 향후 **실시간 PER/PBR** (현재 시점 시가총액 기준)은 별도 페이지/기능으로 구현 예정이며, KIS API 또는 pykrx를 사용할 계획입니다. 재무정보 페이지는 역사적 데이터를 보여주는 것이 목적입니다.
 
 **증분 데이터 수집 (`app/services/financial_service.py`):** 종목이 등록되거나 수동 갱신이 트리거될 때, 서비스는 DB에서 기존 `(fiscal_year, fiscal_quarter)` 쌍을 조회하고 누락된 기간만 DART에서 가져옵니다. 쓰기는 PostgreSQL `INSERT … ON CONFLICT DO UPDATE` (upsert)를 사용합니다. `force` 플래그는 기존 데이터 확인을 우회합니다.
 
@@ -140,6 +148,7 @@ START → orchestrator_start
 
 1. **DB 세션 이중 패턴** — LangGraph 툴 내부에서 비동기 세션을, FastAPI 라우트 핸들러 내부에서 동기 세션을 사용하면 안 됩니다.
 2. **매출액 추정 메타데이터** — `FinancialStatement.raw_data_json`에 `revenue`가 추정된 여부와 원본 계정과목명이 저장됩니다. 프론트엔드는 추정값에 별표와 툴팁을 표시합니다.
-3. **Q4 = 연간** — 분기 수집 대상은 Q4를 명시적으로 제외합니다; 연간 데이터는 `report_type="annual"`로 별도 조회됩니다. `fiscal_quarter` 컬럼의 값은 연간 행에서도 `4`로 설정됩니다.
+3. **Q4 = 연간** — 분기 수집 대상은 Q4를 명시적으로 제외합니다; 연간 데이터는 `report_type="annual"`로 별도 조회됩니다. `fiscal_quarter` 컬럼의 값은 연간 행에서도 `4`로 설정됩니다. Q4 단독 실적 자동 생성은 Q1, Q2, Q3가 모두 존재할 때만 수행됩니다.
 4. **종목 검색 캐시** — `stocks.py`는 pykrx 종목 리스트를 모듈 레벨 변수로 캐시합니다. 백엜드 프로세스를 재시작하면 첫 번째 검색 요청이 들어올 때까지 캐시가 비어있습니다.
 5. **ISR 재검증** — 백엔드는 보고서를 생성한 후 공유 비밀 키와 함께 `{FRONTEND_URL}/api/revalidate`에 POST합니다. 프론트엔드 라우트 핸들러는 해당 페이지에 대해 `revalidatePath`를 호출합니다.
+6. **PER/PBR 계산 3단계 fallback** — 재무정보 페이지의 분기별 PER 계산은 (1) pykrx fundamentals trailing PER → (2) 시가총액 / (분기 순이익 × 4) → (3) PBR 역산 ((PBR × 자본총계) / (순이익 × 4)) 순서로 시도합니다. PBR 계산은 항상 시가총액 / 자본총계입니다. 연간 PER은 시가총액 / 연간 순이익으로 직접 계산합니다.
