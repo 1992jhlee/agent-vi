@@ -160,7 +160,8 @@ async def collect_financial_data(
                 fiscal_year=year,
                 fiscal_quarter=quarter,
                 report_type="annual" if quarter == 4 else "quarterly",
-                data=data
+                data=data,
+                stock_code=stock_code
             )
 
             collected += 1
@@ -208,13 +209,159 @@ async def collect_financial_data(
     }
 
 
+def validate_financial_data(
+    company_id: int,
+    fiscal_year: int,
+    data: dict,
+    stock_code: str = None,
+    metadata: dict = None
+) -> dict:
+    """
+    재무 데이터의 단위 오류를 검증하고 자동 수정합니다.
+
+    단위 오류 패턴:
+    - 매출액이 비정상적으로 큼 (> 1,000조원)
+    - 자산이 비정상적으로 큼 (> 1,000조원)
+
+    자동 수정:
+    - 메타데이터에서 단위 변환 방법이 "heuristic"인 경우에만 자동 수정 시도
+    - header_parse인 경우는 수정하지 않고 경고만 출력
+
+    Args:
+        company_id: Company.id
+        fiscal_year: 회계연도
+        data: 파싱된 재무 데이터
+        stock_code: 종목 코드 (로깅용)
+        metadata: 파싱 메타데이터 (단위 변환 정보 포함)
+
+    Returns:
+        {"valid": bool, "warnings": list, "data": dict (수정된 데이터), "metadata": dict}
+    """
+    warnings = []
+    corrected_data = data.copy()
+    metadata = metadata or {}
+
+    # 단위 변환 방법 확인
+    unit_conversion = metadata.get("unit_conversion", {})
+    detected_method = None
+    if isinstance(unit_conversion, dict):
+        # XML 파싱의 경우: 섹션별로 구분 (income_statement, balance_sheet, cash_flow)
+        for section, conv_info in unit_conversion.items():
+            if isinstance(conv_info, dict) and "detected_method" in conv_info:
+                detected_method = conv_info["detected_method"]
+                break
+        # 통합 detected_method도 확인
+        if not detected_method:
+            detected_method = unit_conversion.get("detected_method")
+
+    # 1. 매출액이 1,000조원 (10^15) 이상이면 단위 오류 의심
+    revenue = data.get("revenue")
+    if revenue and abs(revenue) > 1_000_000_000_000_000:  # 1,000조원
+        warning_msg = (
+            f"매출액이 비정상적으로 큼: {revenue:,}원 ({revenue/1e12:.1f}조원). "
+            f"단위 변환 방법: {detected_method or 'unknown'}"
+        )
+
+        # 휴리스틱으로 추정한 경우에만 자동 수정
+        if detected_method and "heuristic" in detected_method:
+            corrected_revenue = revenue / 1_000
+            corrected_data["revenue"] = corrected_revenue
+            warning_msg += f" → 자동 수정: {corrected_revenue:,}원 ({corrected_revenue/1e12:.1f}조원)"
+
+            if "auto_corrections" not in metadata:
+                metadata["auto_corrections"] = []
+            metadata["auto_corrections"].append({
+                "field": "revenue",
+                "original": revenue,
+                "corrected": corrected_revenue,
+                "reason": "exceeded_threshold_1000T",
+                "method": "divide_by_1000"
+            })
+            logger.info(f"✓ 자동 수정 적용: 매출액 {revenue:,} → {corrected_revenue:,}")
+
+        warnings.append(warning_msg)
+
+    # 2. 자산총계가 1,000조원 이상이면 단위 오류 의심
+    total_assets = data.get("total_assets")
+    if total_assets and abs(total_assets) > 1_000_000_000_000_000:  # 1,000조원
+        warning_msg = (
+            f"자산총계가 비정상적으로 큼: {total_assets:,}원 ({total_assets/1e12:.1f}조원). "
+            f"단위 변환 방법: {detected_method or 'unknown'}"
+        )
+
+        if detected_method and "heuristic" in detected_method:
+            corrected_assets = total_assets / 1_000
+            corrected_data["total_assets"] = corrected_assets
+            warning_msg += f" → 자동 수정: {corrected_assets:,}원 ({corrected_assets/1e12:.1f}조원)"
+
+            if "auto_corrections" not in metadata:
+                metadata["auto_corrections"] = []
+            metadata["auto_corrections"].append({
+                "field": "total_assets",
+                "original": total_assets,
+                "corrected": corrected_assets,
+                "reason": "exceeded_threshold_1000T",
+                "method": "divide_by_1000"
+            })
+            logger.info(f"✓ 자동 수정 적용: 자산총계 {total_assets:,} → {corrected_assets:,}")
+
+        warnings.append(warning_msg)
+
+    # 3. 자본총계가 1,000조원 이상이면 단위 오류 의심
+    total_equity = data.get("total_equity")
+    if total_equity and abs(total_equity) > 1_000_000_000_000_000:  # 1,000조원
+        warning_msg = (
+            f"자본총계가 비정상적으로 큼: {total_equity:,}원 ({total_equity/1e12:.1f}조원). "
+            f"단위 변환 방법: {detected_method or 'unknown'}"
+        )
+
+        if detected_method and "heuristic" in detected_method:
+            corrected_equity = total_equity / 1_000
+            corrected_data["total_equity"] = corrected_equity
+            warning_msg += f" → 자동 수정: {corrected_equity:,}원 ({corrected_equity/1e12:.1f}조원)"
+
+            if "auto_corrections" not in metadata:
+                metadata["auto_corrections"] = []
+            metadata["auto_corrections"].append({
+                "field": "total_equity",
+                "original": total_equity,
+                "corrected": corrected_equity,
+                "reason": "exceeded_threshold_1000T",
+                "method": "divide_by_1000"
+            })
+            logger.info(f"✓ 자동 수정 적용: 자본총계 {total_equity:,} → {corrected_equity:,}")
+
+        warnings.append(warning_msg)
+
+    if warnings:
+        stock_info = f"[{stock_code}] " if stock_code else ""
+        logger.warning(
+            f"⚠️ 재무 데이터 단위 검증: {stock_info}company_id={company_id}, "
+            f"fiscal_year={fiscal_year}\n" + "\n".join(warnings)
+        )
+
+        # validation_flags 추가
+        if "validation_flags" not in metadata:
+            metadata["validation_flags"] = []
+        if len(warnings) > 0:
+            metadata["validation_flags"].append("unit_threshold_exceeded")
+
+    return {
+        "valid": len(warnings) == 0,
+        "warnings": warnings,
+        "data": corrected_data,
+        "metadata": metadata
+    }
+
+
 async def save_financial_statement(
     company_id: int,
     fiscal_year: int,
     fiscal_quarter: int,
     report_type: str,
     data: dict,
-    metadata: dict = None
+    metadata: dict = None,
+    stock_code: str = None
 ):
     """
     재무제표 데이터를 DB에 저장 (upsert)
@@ -226,7 +373,20 @@ async def save_financial_statement(
         report_type: "annual" 또는 "quarterly"
         data: 파싱된 재무 데이터
         metadata: 메타데이터 (추정 여부 등)
+        stock_code: 종목 코드 (검증용, 선택)
     """
+    # 데이터 검증 및 자동 수정
+    validation = validate_financial_data(company_id, fiscal_year, data, stock_code, metadata)
+
+    # 검증 결과에서 수정된 데이터와 메타데이터 사용
+    data = validation["data"]
+    metadata = validation["metadata"]
+
+    if not validation["valid"]:
+        # 경고를 로깅 (자동 수정이 적용되었을 수 있음)
+        logger.warning(f"단위 검증 경고가 있습니다. 자동 수정 적용됨: {metadata.get('auto_corrections', [])}")
+        if "unit_validation_warnings" not in metadata:
+            metadata["unit_validation_warnings"] = validation["warnings"]
     async with async_session_factory() as session:
         stmt = pg_insert(FinancialStatement).values(
             company_id=company_id,
@@ -817,7 +977,8 @@ async def generate_q4_standalone_statements(company_id: int, stock_code: str):
                 fiscal_year=year,
                 fiscal_quarter=4,
                 report_type="quarterly",
-                data=q4_data
+                data=q4_data,
+                stock_code=stock_code
             )
 
             revenue_str = f"{q4_data.get('revenue'):,}원" if q4_data.get('revenue') else "N/A"
@@ -863,23 +1024,40 @@ async def try_multi_source_fallback(
         try:
             # DART 웹 크롤링
             logger.info(f"DART 웹 크롤링 시도: {stock_code} {year}년")
-            data = get_dart_web_financials(corp_code, year)
+            data, xml_metadata = get_dart_web_financials(corp_code, year)
 
             # 데이터가 있으면 저장
             if data and any(data.values()):
+                # 메타데이터 병합
+                metadata = {
+                    "source": "dart_web",
+                    "fallback": True,
+                    **xml_metadata  # parsing_details, unit_conversion 포함
+                }
+
                 await save_financial_statement(
                     company_id=company_id,
                     fiscal_year=year,
                     fiscal_quarter=4,
                     report_type="annual",
                     data=data,
-                    metadata={"source": "dart_web", "fallback": True}
+                    metadata=metadata,
+                    stock_code=stock_code
                 )
 
                 collected += 1
                 revenue_str = f"{data.get('revenue'):,}원" if data.get('revenue') else "N/A"
+
+                # 단위 변환 정보 로깅
+                unit_info = ""
+                if "unit_conversion" in xml_metadata:
+                    unit_conv = xml_metadata["unit_conversion"]
+                    if "income_statement" in unit_conv:
+                        is_unit = unit_conv["income_statement"]
+                        unit_info = f" [손익: {is_unit.get('table_unit', 'N/A')}, 방법: {is_unit.get('detected_method', 'N/A')}]"
+
                 logger.info(
-                    f"DART 웹 크롤링 저장: {stock_code} {year}년 (매출액: {revenue_str})"
+                    f"DART 웹 크롤링 저장: {stock_code} {year}년 (매출액: {revenue_str}){unit_info}"
                 )
             else:
                 logger.warning(f"DART 웹 크롤링 실패: {stock_code} {year}년 - 데이터를 얻을 수 없습니다")

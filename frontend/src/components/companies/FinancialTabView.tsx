@@ -7,9 +7,10 @@ import FinancialTable from "@/components/companies/FinancialTable";
 interface Props {
   annualData: FinancialStatement[];
   quarterlyData: FinancialStatement[];
+  isCalculatingMetrics?: boolean;
 }
 
-export default function FinancialTabView({ annualData, quarterlyData }: Props) {
+export default function FinancialTabView({ annualData, quarterlyData, isCalculatingMetrics = false }: Props) {
   const [tab, setTab] = useState<"annual" | "quarterly">("annual");
 
   return (
@@ -41,7 +42,7 @@ export default function FinancialTabView({ annualData, quarterlyData }: Props) {
       {/* 테이블 */}
       {tab === "annual" ? (
         annualData.length > 0 ? (
-          <FinancialTable type="annual" data={annualData} />
+          <FinancialTable type="annual" data={annualData} isCalculatingMetrics={isCalculatingMetrics} />
         ) : (
           <div className="p-8 bg-gray-50 border border-gray-200 rounded-lg text-center">
             <p className="text-gray-500">
@@ -51,7 +52,7 @@ export default function FinancialTabView({ annualData, quarterlyData }: Props) {
         )
       ) : (
         quarterlyData.length > 0 ? (
-          <FinancialTable type="quarterly" data={quarterlyData} />
+          <FinancialTable type="quarterly" data={quarterlyData} isCalculatingMetrics={isCalculatingMetrics} />
         ) : (
           <div className="p-8 bg-gray-50 border border-gray-200 rounded-lg text-center">
             <p className="text-gray-500">

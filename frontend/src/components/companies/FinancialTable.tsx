@@ -3,9 +3,10 @@ import { FinancialStatement } from "@/lib/types";
 interface Props {
   type: "annual" | "quarterly";
   data: FinancialStatement[];
+  isCalculatingMetrics?: boolean;
 }
 
-export default function FinancialTable({ type, data }: Props) {
+export default function FinancialTable({ type, data, isCalculatingMetrics = false }: Props) {
   const formatAmount = (amount: number | null, fiscalYear: number, fiscalQuarter: number) => {
     if (amount === null || amount === undefined) {
       const currentYear = new Date().getFullYear();
@@ -161,28 +162,43 @@ export default function FinancialTable({ type, data }: Props) {
     </tr>
   );
 
-  const renderCalcRow = (row: CalcRow) => (
-    <tr key={row.label} className="border-b hover:bg-gray-50">
-      <td className="px-4 py-3 font-medium sticky left-0 bg-white">
-        {row.label}
-      </td>
-      {data.map((col) => {
-        const value = row.calc(col);
-        return (
-          <td
-            key={`${col.fiscal_year}-${col.fiscal_quarter}-${row.label}`}
-            className="px-4 py-3 text-right"
-          >
-            {row.format === "percent"
-              ? formatPercent(value)
-              : row.format === "ratio"
-              ? formatRatio(value, row.decimals)
-              : formatAmount(value, col.fiscal_year, col.fiscal_quarter)}
-          </td>
-        );
-      })}
-    </tr>
-  );
+  const renderCalcRow = (row: CalcRow) => {
+    const isPerOrPbr = row.label === "PER" || row.label === "PBR";
+
+    return (
+      <tr key={row.label} className="border-b hover:bg-gray-50">
+        <td className="px-4 py-3 font-medium sticky left-0 bg-white">
+          {row.label}
+        </td>
+        {data.map((col) => {
+          const value = row.calc(col);
+          const showLoadingIndicator = isCalculatingMetrics && isPerOrPbr && value === null;
+
+          return (
+            <td
+              key={`${col.fiscal_year}-${col.fiscal_quarter}-${row.label}`}
+              className="px-4 py-3 text-right"
+            >
+              {showLoadingIndicator ? (
+                <div className="flex items-center justify-end gap-2">
+                  <div className="animate-spin rounded-full h-3 w-3 border border-gray-300 border-t-blue-500" />
+                  <span className="text-xs text-gray-400">계산 중...</span>
+                </div>
+              ) : (
+                <>
+                  {row.format === "percent"
+                    ? formatPercent(value)
+                    : row.format === "ratio"
+                    ? formatRatio(value, row.decimals)
+                    : formatAmount(value, col.fiscal_year, col.fiscal_quarter)}
+                </>
+              )}
+            </td>
+          );
+        })}
+      </tr>
+    );
+  };
 
   return (
     <div>

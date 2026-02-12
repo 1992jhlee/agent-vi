@@ -26,7 +26,6 @@ interface Props {
 
 export default function CompanyDetailClient({ company, stockCode, initialData }: Props) {
   const [financialData, setFinancialData] = useState(initialData);
-  const [isLoading, setIsLoading] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
 
   // 연간 실적 (report_type === 'annual')
@@ -64,11 +63,8 @@ export default function CompanyDetailClient({ company, stockCode, initialData }:
   useEffect(() => {
     if (!needsLoading || retryCount >= 20) {
       // 데이터가 준비되었거나 최대 재시도 횟수 초과
-      setIsLoading(false);
       return;
     }
-
-    setIsLoading(true);
 
     // 3초마다 재조회 (최대 20번 = 1분)
     const timer = setTimeout(async () => {
@@ -129,7 +125,7 @@ export default function CompanyDetailClient({ company, stockCode, initialData }:
       )}
 
       {/* 로딩 상태 표시 */}
-      {isLoading && needsLoading && (
+      {needsLoading && retryCount < 20 && (
         <div className="mb-8 p-6 bg-blue-50 border border-blue-200 rounded-lg">
           <div className="flex items-center justify-center">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mr-4"></div>
@@ -144,9 +140,11 @@ export default function CompanyDetailClient({ company, stockCode, initialData }:
       )}
 
       {/* 재무 실적 (연간/분기 토글) */}
-      {!isLoading && (
-        <FinancialTabView annualData={annualData} quarterlyData={quarterlyData} />
-      )}
+      <FinancialTabView
+        annualData={annualData}
+        quarterlyData={quarterlyData}
+        isCalculatingMetrics={needsLoading && retryCount < 20}
+      />
     </div>
   );
 }

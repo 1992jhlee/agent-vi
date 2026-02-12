@@ -15,39 +15,140 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 
-# DART 표준 account_id (XBRL 태그) 매핑
-# account_id는 회사·분기 구분 없이 동일한 항목에 동일한 코드를 사용하므로
-# account_nm(회사별 자유형식 텍스트) 키워드 매칭보다 정확합니다.
+# DART 재무데이터 파싱 전략 맵 (리스트 기반 fallback)
+# 각 필드는 우선순위에 따라 여러 전략을 시도합니다.
+# account_id는 회사·분기 구분 없이 동일하므로 account_nm 키워드보다 정확합니다.
 # sj_div는 재무제표 종류 코드: BS(재무상태표), IS/CIS(손익계산서), CF(현금흐름표)
-_ACCOUNT_MAP: dict[str, tuple[str, set[str]]] = {
-    # 손익계산서 (IS: 단일, CIS: 포괄)
-    "revenue":           ("ifrs-full_Revenue",          {"IS", "CIS"}),
-    "operating_income":  ("dart_OperatingIncomeLoss",   {"IS", "CIS"}),
-    "net_income":        ("ifrs-full_ProfitLoss",       {"IS", "CIS"}),
-    # 재무상태표
-    "total_assets":         ("ifrs-full_Assets",              {"BS"}),
-    "total_liabilities":    ("ifrs-full_Liabilities",         {"BS"}),
-    "total_equity":         ("ifrs-full_Equity",              {"BS"}),
-    "current_assets":       ("ifrs-full_CurrentAssets",       {"BS"}),
-    "current_liabilities":  ("ifrs-full_CurrentLiabilities",  {"BS"}),
-    "inventories":          ("ifrs-full_Inventories",         {"BS"}),
-    # 현금흐름표
-    "operating_cash_flow":  ("ifrs-full_CashFlowsFromUsedInOperatingActivities",  {"CF"}),
-    "investing_cash_flow":  ("ifrs-full_CashFlowsFromUsedInInvestingActivities",  {"CF"}),
-    "financing_cash_flow":  ("ifrs-full_CashFlowsFromUsedInFinancingActivities",  {"CF"}),
-    "capex":                ("ifrs-full_PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities", {"CF"}),
+_ACCOUNT_MAP: dict[str, list[dict[str, Any]]] = {
+    # 매출액: 제조업 → 금융업
+    "revenue": [
+        {
+            "method": "single_tag",
+            "account_id": "ifrs-full_Revenue",
+            "divs": {"IS", "CIS"},
+            "priority": 1,
+            "description": "제조업 매출액"
+        },
+        {
+            "method": "sum",
+            "account_ids": [
+                "ifrs-full_FeeAndCommissionIncome",  # 수수료수익
+                "ifrs-full_RevenueFromInterest"      # 이자수익
+            ],
+            "divs": {"IS", "CIS"},
+            "priority": 2,
+            "description": "금융업 매출액 (수수료+이자)"
+        },
+    ],
+
+    # 영업이익: 제조업 → 금융업
+    "operating_income": [
+        {
+            "method": "single_tag",
+            "account_id": "dart_OperatingIncomeLoss",
+            "divs": {"IS", "CIS"},
+            "priority": 1,
+            "description": "제조업 영업이익"
+        },
+        {
+            "method": "account_nm_match",
+            "keywords": ["순영업손익"],
+            "divs": {"IS", "CIS"},
+            "priority": 2,
+            "description": "금융업 순영업손익"
+        },
+    ],
+
+    # 당기순이익: 표준 → 세전이익 → 비표준
+    "net_income": [
+        {
+            "method": "single_tag",
+            "account_id": "ifrs-full_ProfitLoss",
+            "divs": {"IS", "CIS"},
+            "priority": 1,
+            "description": "표준 당기순이익"
+        },
+        {
+            "method": "single_tag",
+            "account_id": "ifrs-full_ProfitLossBeforeTax",
+            "divs": {"IS", "CIS"},
+            "priority": 2,
+            "description": "세전이익 (fallback)"
+        },
+        {
+            "method": "account_nm_match",
+            "keywords": ["분기순이익", "당기순이익", "반기순이익"],
+            "divs": {"IS", "CIS"},
+            "priority": 3,
+            "description": "비표준 순이익 (최하위)"
+        },
+    ],
+
+    # 재무상태표 (단일 전략)
+    "total_assets": [
+        {"method": "single_tag", "account_id": "ifrs-full_Assets", "divs": {"BS"}, "priority": 1}
+    ],
+    "total_liabilities": [
+        {"method": "single_tag", "account_id": "ifrs-full_Liabilities", "divs": {"BS"}, "priority": 1}
+    ],
+    "total_equity": [
+        {"method": "single_tag", "account_id": "ifrs-full_Equity", "divs": {"BS"}, "priority": 1}
+    ],
+    "current_assets": [
+        {"method": "single_tag", "account_id": "ifrs-full_CurrentAssets", "divs": {"BS"}, "priority": 1}
+    ],
+    "current_liabilities": [
+        {"method": "single_tag", "account_id": "ifrs-full_CurrentLiabilities", "divs": {"BS"}, "priority": 1}
+    ],
+    "inventories": [
+        {"method": "single_tag", "account_id": "ifrs-full_Inventories", "divs": {"BS"}, "priority": 1}
+    ],
+
+    # 현금흐름표 (단일 전략)
+    "operating_cash_flow": [
+        {"method": "single_tag", "account_id": "ifrs-full_CashFlowsFromUsedInOperatingActivities", "divs": {"CF"}, "priority": 1}
+    ],
+    "investing_cash_flow": [
+        {"method": "single_tag", "account_id": "ifrs-full_CashFlowsFromUsedInInvestingActivities", "divs": {"CF"}, "priority": 1}
+    ],
+    "financing_cash_flow": [
+        {"method": "single_tag", "account_id": "ifrs-full_CashFlowsFromUsedInFinancingActivities", "divs": {"CF"}, "priority": 1}
+    ],
+
+    # CAPEX: 단일 태그 → 세부 합산 → account_nm 매칭
+    "capex": [
+        {
+            "method": "single_tag",
+            "account_id": "ifrs-full_PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities",
+            "divs": {"CF"},
+            "priority": 1,
+            "description": "표준 CAPEX 태그"
+        },
+        {
+            "method": "sum",
+            "account_ids": [
+                "dart_PurchaseOfLand",
+                "dart_PurchaseOfMachinery",
+                "dart_PurchaseOfStructure",
+                "dart_PurchaseOfVehicles",
+                "dart_PurchaseOfOtherPropertyPlantAndEquipment",
+                "dart_PurchaseOfConstructionInProgress",
+                "dart_PurchaseOfBuildings",
+            ],
+            "divs": {"CF"},
+            "priority": 2,
+            "description": "세부 유형자산 취득 합산"
+        },
+        {
+            "method": "account_nm_match",
+            "keywords": ["유형자산 취득", "유형자산의 취득"],
+            "divs": {"CF"},
+            "priority": 3,
+            "description": "비표준 CAPEX (account_nm)"
+        },
+    ],
 }
 
-# capex를 단일 태그로 신고하지 않는 회사의 경우, 세부 유형자산 취득 태그를 합산하여 사용
-_CAPEX_DETAIL_TAGS = [
-    "dart_PurchaseOfLand",
-    "dart_PurchaseOfMachinery",
-    "dart_PurchaseOfStructure",
-    "dart_PurchaseOfVehicles",
-    "dart_PurchaseOfOtherPropertyPlantAndEquipment",
-    "dart_PurchaseOfConstructionInProgress",
-    "dart_PurchaseOfBuildings",
-]
 
 
 class DARTClient:
@@ -266,12 +367,92 @@ class DARTClient:
             logger.error(f"기업코드 조회 실패: {e}", exc_info=True)
             return None
 
+    def _try_parse_strategy(self, df: pd.DataFrame, strategy: dict[str, Any]) -> Any | None:
+        """
+        단일 파싱 전략 시도
+
+        Args:
+            df: 재무제표 DataFrame
+            strategy: 파싱 전략 딕셔너리
+
+        Returns:
+            파싱된 값 또는 None
+        """
+        method = strategy["method"]
+        divs = strategy["divs"]
+
+        if method == "single_tag":
+            # 단일 account_id 조회
+            account_id = strategy["account_id"]
+            mask = (df["account_id"] == account_id) & (df["sj_div"].isin(divs))
+            rows = df[mask]
+            for _, row in rows.iterrows():
+                value = self._extract_value(row.get("thstrm_amount", 0))
+                if value is not None:
+                    return value
+
+        elif method == "sum":
+            # 여러 account_id 합산 (금융업 매출액, CAPEX 세부 항목 등)
+            account_ids = strategy["account_ids"]
+            total = 0
+            found_any = False
+            for account_id in account_ids:
+                mask = (df["account_id"] == account_id) & (df["sj_div"].isin(divs))
+                rows = df[mask]
+                for _, row in rows.iterrows():
+                    value = self._extract_value(row.get("thstrm_amount", 0))
+                    if value is not None:
+                        total += value
+                        found_any = True
+                        break  # 첫 번째 유효 값만 사용
+
+            if found_any:
+                return total
+
+        elif method == "account_nm_match":
+            # account_nm 키워드 매칭 (비표준 계정과목)
+            keywords = strategy["keywords"]
+            mask = (df["account_id"] == "-표준계정코드 미사용-") & (df["sj_div"].isin(divs))
+
+            # CAPEX는 절대값 처리
+            is_capex = any("유형자산" in kw for kw in keywords)
+
+            # net_income은 최하위 계층 사용
+            is_net_income = any("순이익" in kw for kw in keywords)
+
+            if is_net_income:
+                # 최하위 계층의 순이익 (마지막 행)
+                candidate_rows = []
+                for _, row in df[mask].iterrows():
+                    nm = str(row.get("account_nm", "")).strip()
+                    for keyword in keywords:
+                        if keyword in nm:
+                            val = self._extract_value(row.get("thstrm_amount", 0))
+                            if val is not None:
+                                candidate_rows.append(val)
+                                break
+
+                if candidate_rows:
+                    return candidate_rows[-1]  # 마지막 행 (최하위)
+
+            else:
+                # 일반 매칭 (첫 번째 유효 값)
+                for _, row in df[mask].iterrows():
+                    nm = str(row.get("account_nm", "")).strip()
+                    for keyword in keywords:
+                        if keyword in nm:
+                            val = self._extract_value(row.get("thstrm_amount", 0))
+                            if val is not None:
+                                return abs(val) if is_capex else val
+
+        return None
+
     def parse_financial_data(self, df: pd.DataFrame) -> dict[str, Any]:
         """
-        재무제표 DataFrame을 구조화된 딕셔너리로 변환
+        재무제표 DataFrame을 구조화된 딕셔너리로 변환 (통합 파서)
 
-        DART의 표준 account_id (XBRL 태그)와 sj_div 코드를 사용하여
-        회사·분기마다 다른 계정과목명(account_nm) 없이 정확하게 항목을 식별합니다.
+        리스트 기반 fallback 전략으로 제조업/금융업 구분 없이 통합 파싱합니다.
+        각 필드는 우선순위에 따라 여러 전략을 시도하며, 첫 성공한 전략의 값을 사용합니다.
 
         Args:
             df: get_financial_statements()에서 반환된 DataFrame
@@ -285,96 +466,18 @@ class DARTClient:
         result = {}
 
         try:
-            for field, (account_id, allowed_divs) in _ACCOUNT_MAP.items():
-                mask = (df["account_id"] == account_id) & (df["sj_div"].isin(allowed_divs))
-                rows = df[mask]
-                # OWN/CON 행이 혼재할 수 있으므로 첫 번째 유효 값을 사용
-                for _, row in rows.iterrows():
-                    value = self._extract_value(row.get("thstrm_amount", 0))
+            # 각 필드에 대해 전략 리스트 시도
+            for field, strategies in _ACCOUNT_MAP.items():
+                for strategy in sorted(strategies, key=lambda x: x["priority"]):
+                    value = self._try_parse_strategy(df, strategy)
                     if value is not None:
                         result[field] = value
-                        break
-
-            # capex fallback: 단일 태그 미사용 시 세부 유형자산 취득 항목 합산
-            if "capex" not in result:
-                capex_sum = 0
-                capex_found = False
-                for tag in _CAPEX_DETAIL_TAGS:
-                    mask = (df["account_id"] == tag) & (df["sj_div"] == "CF")
-                    rows = df[mask]
-                    for _, row in rows.iterrows():
-                        val = self._extract_value(row.get("thstrm_amount", 0))
-                        if val is not None:
-                            capex_sum += val
-                            capex_found = True
-                            break
-                if capex_found:
-                    result["capex"] = capex_sum
-                    logger.debug(f"capex fallback 합산: {capex_sum}")
-
-            # capex fallback 2: 표준 계정코드 미사용 시 account_nm으로 직접 매칭
-            # 일부 회사·연도에서 XBRL 태그를 사용하지 않고 자유형식 계정과목명만 신고함
-            if "capex" not in result:
-                _capex_nm_variants = {"유형자산 취득", "유형자산의 취득"}
-                nm_mask = (
-                    (df["account_id"] == "-표준계정코드 미사용-")
-                    & (df["sj_div"] == "CF")
-                )
-                for _, row in df[nm_mask].iterrows():
-                    nm = str(row.get("account_nm", "")).strip()
-                    if nm in _capex_nm_variants:
-                        val = self._extract_value(row.get("thstrm_amount", 0))
-                        if val is not None:
-                            # 회사별 부호 표현이 다를 수 있으므로 절대값으로 표준화
-                            result["capex"] = abs(val)
-                            logger.debug(
-                                f"capex nm-fallback: nm='{nm}' "
-                                f"raw={val} → {abs(val)}"
-                            )
-                            break
-
-            # net_income fallback: 표준 계정코드 미사용 시 account_nm으로 직접 매칭
-            if "net_income" not in result:
-                # 1차: 법인세비용차감전순이익 (세전 이익, 차선책)
-                mask = (df["account_id"] == "ifrs-full_ProfitLossBeforeTax") & (df["sj_div"].isin(["IS", "CIS"]))
-                rows = df[mask]
-                for _, row in rows.iterrows():
-                    val = self._extract_value(row.get("thstrm_amount", 0))
-                    if val is not None:
-                        result["net_income"] = val
-                        logger.debug(f"net_income fallback: ProfitLossBeforeTax = {val}")
-                        break
-
-            # net_income fallback 2: 비표준 계정과목명 매칭 (분기순이익, 당기순이익 등)
-            if "net_income" not in result:
-                _net_income_nm_keywords = ["분기순이익", "당기순이익", "반기순이익"]
-                nm_mask = (
-                    (df["account_id"] == "-표준계정코드 미사용-")
-                    & (df["sj_div"].isin(["IS", "CIS"]))
-                )
-                # 최하위 계층의 순이익을 찾기 위해 역순으로 탐색
-                candidate_rows = []
-                for _, row in df[nm_mask].iterrows():
-                    nm = str(row.get("account_nm", "")).strip()
-                    for keyword in _net_income_nm_keywords:
-                        if keyword in nm:
-                            val = self._extract_value(row.get("thstrm_amount", 0))
-                            if val is not None:
-                                candidate_rows.append((nm, val, row.name))
-                                break
-
-                if candidate_rows:
-                    # 가장 마지막 행(최하위 계층)의 순이익 사용
-                    last_row = candidate_rows[-1]
-                    result["net_income"] = last_row[1]
-                    logger.debug(
-                        f"net_income nm-fallback: nm='{last_row[0]}' value={last_row[1]} "
-                        f"({len(candidate_rows)}개 후보 중 마지막 선택)"
-                    )
-
-            # 금융업 특화 파싱 (Revenue/OperatingIncomeLoss 태그 없을 때)
-            if "revenue" not in result or "operating_income" not in result:
-                self._parse_financial_industry(df, result)
+                        desc = strategy.get("description", "")
+                        logger.debug(
+                            f"{field} 파싱 성공: {value:,} "
+                            f"(전략: {strategy['method']}, {desc})"
+                        )
+                        break  # 성공하면 다음 fallback 시도 안 함
 
             logger.debug(f"재무 데이터 파싱 완료: {len(result)} 항목")
 
@@ -383,65 +486,13 @@ class DARTClient:
 
         return result
 
-    def _parse_financial_industry(self, df: pd.DataFrame, result: dict):
-        """
-        금융업(은행, 증권, 보험 등) 재무제표 파싱
-
-        금융업은 일반 제조업과 다른 구조를 사용:
-        - Revenue 대신: 수수료수익 + 이자수익 등
-        - OperatingIncomeLoss 대신: 순영업손익
-
-        Args:
-            df: 재무제표 DataFrame
-            result: 파싱 결과 딕셔너리 (in-place 수정)
-        """
-        is_df = df[df['sj_div'].isin(['IS', 'CIS'])]
-
-        # 1. 매출액 추정: 수수료수익 + 이자수익
-        if "revenue" not in result:
-            fee_income = None
-            interest_income = None
-
-            # 수수료수익
-            fee_rows = is_df[is_df['account_id'] == 'ifrs-full_FeeAndCommissionIncome']
-            for _, row in fee_rows.iterrows():
-                val = self._extract_value(row.get('thstrm_amount', 0))
-                if val is not None:
-                    fee_income = val
-                    break
-
-            # 이자수익
-            interest_rows = is_df[is_df['account_id'] == 'ifrs-full_RevenueFromInterest']
-            for _, row in interest_rows.iterrows():
-                val = self._extract_value(row.get('thstrm_amount', 0))
-                if val is not None:
-                    interest_income = val
-                    break
-
-            # 합산
-            if fee_income is not None or interest_income is not None:
-                result["revenue"] = (fee_income or 0) + (interest_income or 0)
-                logger.info(
-                    f"금융업 매출액 추정: 수수료수익({fee_income or 0:,}) + "
-                    f"이자수익({interest_income or 0:,}) = {result['revenue']:,}"
-                )
-
-        # 2. 영업이익 추정: 순영업손익
-        if "operating_income" not in result:
-            # "순영업손익" account_nm으로 검색 (표준 태그 없음)
-            nm_mask = is_df['account_nm'].str.contains('순영업손익', case=False, na=False)
-            oi_rows = is_df[nm_mask]
-
-            for _, row in oi_rows.iterrows():
-                val = self._extract_value(row.get('thstrm_amount', 0))
-                if val is not None:
-                    result["operating_income"] = val
-                    logger.info(f"금융업 영업이익 추정: 순영업손익 = {val:,}")
-                    break
-
     def _extract_value(self, value: Any) -> int | None:
         """
-        DART API 값을 정수로 변환
+        DART API 값을 정수로 변환 (원 단위 그대로)
+
+        DART API는 원(KRW) 단위로 값을 반환하며,
+        DB에도 원 단위 그대로 저장합니다.
+        프론트엔드에서 표시 시 억원 단위로 변환합니다.
         """
         try:
             if isinstance(value, str):
